@@ -16,6 +16,7 @@ import { CheckinDetail, CheckinHistoryRow } from "@/components/checkin-detail";
 import { CoachResponseView } from "@/components/coach-response-view";
 import {
   ResponseComposer,
+  GenerateCoachResponseButton,
   PredictionForm,
   OutcomeForm,
   MemoryNoteForm,
@@ -110,6 +111,9 @@ export default async function AthleteReviewPage({
   const outcomes = predictions.map(firstOutcome).filter(Boolean) as PredictionOutcome[];
   const metrics = computeTrustMetrics(feedback, outcomes, predictions.length);
   const feedbackByResponse = new Set(feedback.map((f) => f.coach_response_id));
+  const hasDraftToday = responses.some(
+    (r) => r.status === "draft" && r.response_date === today,
+  );
 
   // Signed URLs for screenshots.
   const urlMap = new Map<string, string>();
@@ -176,13 +180,22 @@ export default async function AthleteReviewPage({
 
           {/* Compose response */}
           <section className="card border-accent/30">
-            <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-2">
-              Write today's decision
-            </h2>
-            <p className="mb-4 text-xs text-muted">
-              Conclusions first. Make it specific, non-obvious, and personal — the
-              kind of call they couldn't get from their own device.
-            </p>
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-2">
+                  Write today's decision
+                </h2>
+                <p className="text-xs text-muted">
+                  Conclusions first. Specific, non-obvious, personal — or let
+                  Claude draft it, then review and approve below.
+                </p>
+              </div>
+              <GenerateCoachResponseButton
+                userId={id}
+                dateISO={today}
+                hasDraftToday={hasDraftToday}
+              />
+            </div>
             <ResponseComposer userId={id} dateISO={today} />
           </section>
 
@@ -203,6 +216,9 @@ export default async function AthleteReviewPage({
                           {formatDate(r.response_date)} · editing draft
                         </span>
                         <div className="flex items-center gap-2">
+                          {r.ai_generated ? (
+                            <span className="pill bg-accent/15 text-accent">AI draft</span>
+                          ) : null}
                           <StatusPill value={r.status} />
                           <DeleteResponseButton userId={id} responseId={r.id} />
                         </div>
@@ -216,6 +232,9 @@ export default async function AthleteReviewPage({
                           {formatDate(r.response_date)}
                         </span>
                         <div className="flex items-center gap-2">
+                          {r.ai_generated ? (
+                            <span className="pill bg-accent/15 text-accent">AI-assisted</span>
+                          ) : null}
                           <span
                             className={`pill ${
                               feedbackByResponse.has(r.id)

@@ -42,6 +42,15 @@ export function CoachResponseView({ response }: { response: CoachResponse }) {
         <Prose text={response.prediction} />
       </div>
 
+      {response.athlete_question && response.athlete_question.trim() ? (
+        <div className="rounded-2xl border border-accent/30 bg-accent/5 p-5">
+          <div className="eyebrow mb-2 text-accent">One question for you</div>
+          <div className="text-base font-medium leading-relaxed text-foreground">
+            <Prose text={response.athlete_question} />
+          </div>
+        </div>
+      ) : null}
+
       {response.data_used && response.data_used.trim() ? (
         <details className="group rounded-xl border border-border bg-surface px-4 py-3">
           <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-muted">

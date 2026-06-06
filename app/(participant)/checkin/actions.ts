@@ -77,9 +77,21 @@ export async function saveCheckin(
     .from("daily_checkins")
     .upsert(payload, { onConflict: "user_id,checkin_date" });
 
-  if (error) return { error: error.message };
+  if (error) {
+    console.error(
+      `[checkin] save failed for user=${user.id} date=${checkinDate}:`,
+      error.message,
+    );
+    return {
+      error: `Could not save your check-in: ${error.message}. Please try again.`,
+    };
+  }
+
+  console.log(`[checkin] saved for user=${user.id} date=${checkinDate}`);
 
   revalidatePath("/dashboard");
   revalidatePath("/checkin");
+  // The coach console reads check-ins too; make sure it reflects this submission.
+  revalidatePath("/admin");
   redirect("/dashboard?saved=checkin");
 }

@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
 import {
   saveCoachResponse,
   deleteCoachResponse,
@@ -102,6 +103,73 @@ export function ActionButton({
 }
 
 // ---------------------------------------------------------------------------
+// Generate Coach Response — asks Claude (server-side) to draft today's decision,
+// saves it as a draft, then refreshes so it shows up in the drafts list below
+// for review/edit/approve. Never sends anything to the athlete.
+// ---------------------------------------------------------------------------
+export function GenerateCoachResponseButton({
+  userId,
+  dateISO,
+  hasDraftToday,
+}: {
+  userId: string;
+  dateISO: string;
+  hasDraftToday?: boolean;
+}) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function generate() {
+    if (pending) return;
+    if (
+      hasDraftToday &&
+      !window.confirm(
+        "A draft already exists for today. Generate a fresh AI draft? This replaces the current AI draft for today — your sent responses and hand-written drafts are kept.",
+      )
+    ) {
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/generate-coach-response", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, response_date: dateISO }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || `Request failed (${res.status}).`);
+      }
+      // Pull the new draft into the page (it renders in the drafts list below).
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not generate a draft.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <button
+        type="button"
+        onClick={generate}
+        disabled={pending}
+        className="btn-accent btn-sm"
+      >
+        {pending ? "Claude is drafting…" : "✨ Generate Coach Response"}
+      </button>
+      {error ? <span className="text-xs text-danger">{error}</span> : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Coach response composer (create or edit a daily decision).
 // ---------------------------------------------------------------------------
 export function ResponseComposer({
@@ -175,6 +243,10 @@ export function ResponseComposer({
 
       <Field label="What data you used" htmlFor={`du-${r?.id ?? "new"}`}>
         <textarea id={`du-${r?.id ?? "new"}`} name="data_used" defaultValue={r?.data_used ?? ""} className="input min-h-[52px]" placeholder="HRV trend, sleep, soreness, the WHOOP screenshot, their note about work stress…" />
+      </Field>
+
+      <Field label="One question for the athlete" htmlFor={`aq-${r?.id ?? "new"}`}>
+        <textarea id={`aq-${r?.id ?? "new"}`} name="athlete_question" defaultValue={r?.athlete_question ?? ""} className="input min-h-[44px]" placeholder="One short question that would sharpen tomorrow's call." />
       </Field>
 
       <ErrorLine state={state} />

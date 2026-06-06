@@ -62,6 +62,7 @@ export async function saveCoachResponse(
     prediction: str(formData, "prediction"),
     confidence: str(formData, "confidence"),
     data_used: str(formData, "data_used"),
+    athlete_question: str(formData, "athlete_question"),
     status,
   };
 

@@ -39,7 +39,13 @@ local `web/.env.local` (or Supabase → **Project Settings → API**).
 |---|---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | ✅ Required | No (public) | Your project URL. **Inlined into the browser bundle at build time.** |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ Required | No (public) | Anon key; safe in the browser. **Inlined at build time.** |
-| `SUPABASE_SERVICE_ROLE_KEY` | ⬜ Optional | **YES** | Currently **unused** by the app (defined in `lib/supabase/admin.ts` but never imported). Add only if/when you wire up server-side admin helpers. Never give it a `NEXT_PUBLIC_` prefix. |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ Required | **YES** | Used by the background screenshot OCR to write parsed values into check-ins (`lib/supabase/admin.ts`). Never give it a `NEXT_PUBLIC_` prefix. |
+| `ANTHROPIC_API_KEY` | ✅ Required | **YES** | Powers screenshot OCR (Claude vision reads Whoop/nutrition screenshots and auto-fills the day's check-in). Get one at <https://console.anthropic.com> → API Keys. Server-only — never `NEXT_PUBLIC_`. |
+| `OCR_MODEL` | ⬜ Optional | No | Overrides the vision model (default `claude-sonnet-4-6`). |
+
+> **New dependency:** the OCR feature uses the `@anthropic-ai/sdk` package. Run
+> `npm install @anthropic-ai/sdk` locally and commit the updated `package.json` /
+> `package-lock.json` before deploying.
 
 > The two `NEXT_PUBLIC_*` values are baked in at **build time**, so they must be
 > present in Vercel *before* the build runs. If you add/change them later, trigger

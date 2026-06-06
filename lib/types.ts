@@ -83,6 +83,8 @@ export interface DailyCheckin {
   updated_at: string;
 }
 
+export type ParseStatus = "pending" | "processing" | "done" | "error" | "skipped";
+
 export interface UploadedScreenshot {
   id: string;
   user_id: string;
@@ -92,6 +94,10 @@ export interface UploadedScreenshot {
   capture_date: string | null;
   note: string | null;
   created_at: string;
+  parse_status: ParseStatus;
+  parsed_json: Record<string, number | null> | null;
+  parsed_at: string | null;
+  parse_error: string | null;
 }
 
 export interface CoachResponse {
@@ -104,7 +110,9 @@ export interface CoachResponse {
   prediction: string | null;
   confidence: Confidence | null;
   data_used: string | null;
+  athlete_question: string | null;
   status: ResponseStatus;
+  ai_generated: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;

@@ -16,6 +16,13 @@ This app needs a Supabase project. Free tier is fine for a 20–30 person beta.
    - row-level-security policies on every table
    - a private **`screenshots`** storage bucket + its access policies
 
+### Already have a running database?
+If your project predates the AI coach-draft workflow, run the small migration to
+add the two columns it needs (`athlete_question`, `ai_generated`):
+**SQL Editor → New query** → paste all of `supabase/add-coach-ai-fields.sql` →
+**Run**. It is safe to re-run, and `schema.sql` already includes these columns for
+fresh installs.
+
 ## 3. Get your API keys
 **Project Settings** (gear icon) → **API**:
 - **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`

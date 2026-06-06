@@ -14,11 +14,17 @@ import type { UserFeedback, PredictionOutcome } from "@/lib/types";
 
 export const metadata = { title: "Coach Console — The Coach" };
 
+// Always render fresh. The cohort and today's check-ins change as participants
+// submit, so the coach console must never serve a cached snapshot (this is also
+// why a freshly submitted check-in could appear "missing" until a hard reload).
+export const dynamic = "force-dynamic";
+
 type UserRow = {
   id: string;
   email: string | null;
   full_name: string | null;
   created_at: string;
+  role: string;
 };
 
 export default async function AdminDashboard() {
@@ -27,10 +33,13 @@ export default async function AdminDashboard() {
 
   const [usersRes, profilesRes, feedbackRes, responsesRes, checkinsRes, outcomesRes, predCountRes] =
     await Promise.all([
+      // NOTE: do NOT filter by role here. Filtering to role = 'participant'
+      // hid admin/test accounts (e.g. the founder running as Subject 001), so
+      // their own check-ins never rendered. We fetch everyone and decide who to
+      // show below based on actual participation.
       supabase
         .from("users")
-        .select("id, email, full_name, created_at")
-        .eq("role", "participant")
+        .select("id, email, full_name, created_at, role")
         .order("created_at", { ascending: true }),
       supabase.from("athlete_profiles").select("user_id, primary_sport, goal_detail"),
       supabase
@@ -49,6 +58,20 @@ export default async function AdminDashboard() {
   const checkins = (checkinsRes.data as { user_id: string; checkin_date: string }[]) ?? [];
   const outcomes = (outcomesRes.data as PredictionOutcome[]) ?? [];
   const predictionsTotal = predCountRes.count ?? 0;
+
+  // Surface query failures in the server logs. Previously these were swallowed
+  // by the `?? []` fallbacks, which made data-loading bugs invisible.
+  for (const [name, res] of Object.entries({
+    users: usersRes,
+    profiles: profilesRes,
+    feedback: feedbackRes,
+    responses: responsesRes,
+    checkins: checkinsRes,
+    outcomes: outcomesRes,
+    predictions: predCountRes,
+  })) {
+    if (res.error) console.error(`[admin-dashboard] ${name} query failed:`, res.error.message);
+  }
 
   // Cohort-level metrics.
   const cohort = computeTrustMetrics(feedback, outcomes, predictionsTotal);
@@ -81,11 +104,25 @@ export default async function AdminDashboard() {
     checkinBy.set(c.user_id, cur);
   });
 
-  const awaitingCount = users.filter((u) => {
+  // Who to show: every participant, plus any other account (e.g. an admin/test
+  // user such as the founder running as Subject 001) that has actually taken
+  // part by submitting a check-in or completing a profile. This is the core fix
+  // for the coach's own check-in being hidden.
+  const participants = users.filter(
+    (u) => u.role === "participant" || checkinBy.has(u.id) || profileBy.has(u.id),
+  );
+
+  const awaitingCount = participants.filter((u) => {
     const ci = checkinBy.get(u.id);
     const rb = respBy.get(u.id);
     return ci?.today && !rb?.sentToday;
   }).length;
+
+  const checkinsToday = [...checkinBy.values()].filter((c) => c.today).length;
+  console.log(
+    `[admin-dashboard] today=${today} users=${users.length} shown=${participants.length} ` +
+      `checkins_today=${checkinsToday} awaiting=${awaitingCount}`,
+  );
 
   return (
     <PageShell width="wide">
@@ -99,7 +136,7 @@ export default async function AdminDashboard() {
 
       {/* Cohort metrics */}
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Participants" value={users.length} />
+        <StatCard label="Participants" value={participants.length} />
         <StatCard label="Feedback collected" value={cohort.feedbackCount} />
         <StatCard
           label="Awaiting response"
@@ -132,14 +169,14 @@ export default async function AdminDashboard() {
         </h2>
       </div>
 
-      {users.length === 0 ? (
+      {participants.length === 0 ? (
         <EmptyState
           title="No participants yet"
           body="Once athletes sign up and complete onboarding, they'll appear here. Share the signup link to start recruiting your cohort."
         />
       ) : (
         <div className="space-y-2">
-          {users.map((u) => {
+          {participants.map((u) => {
             const prof = profileBy.get(u.id);
             const fb = feedbackBy.get(u.id) ?? [];
             const aha = fb.filter((f) => f.felt_personalized === "yes").length;
@@ -166,6 +203,9 @@ export default async function AdminDashboard() {
                     ) : (
                       <span className="pill bg-warning/15 text-warning">No profile</span>
                     )}
+                    {u.role !== "participant" ? (
+                      <span className="pill bg-accent/15 text-accent">{u.role}</span>
+                    ) : null}
                   </div>
                   <div className="mt-0.5 truncate text-xs text-muted-2">
                     {prof?.goal_detail || u.email}

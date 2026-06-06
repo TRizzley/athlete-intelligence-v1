@@ -148,7 +148,13 @@ create table if not exists public.uploaded_screenshots (
   file_name    text,
   capture_date date,
   note         text,
-  created_at   timestamptz not null default now()
+  created_at   timestamptz not null default now(),
+  -- Background OCR (Claude vision) status + extracted values.
+  parse_status text not null default 'pending'
+               check (parse_status in ('pending','processing','done','error','skipped')),
+  parsed_json  jsonb,
+  parsed_at    timestamptz,
+  parse_error  text
 );
 
 -- 2.5 coach_responses (hand-written daily decision)
@@ -162,7 +168,9 @@ create table if not exists public.coach_responses (
   prediction      text,
   confidence      text check (confidence in ('low', 'medium', 'high')),
   data_used       text,
+  athlete_question text,
   status          text not null default 'draft' check (status in ('draft', 'sent')),
+  ai_generated    boolean not null default false,
   created_by      uuid references public.users(id),
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),

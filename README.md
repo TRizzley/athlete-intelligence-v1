@@ -56,6 +56,8 @@ Copy `.env.example` to `.env.local` and fill in your three values:
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+# Optional but needed for the AI features (screenshot OCR + Generate Coach Response):
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ### 5. Install and run
@@ -87,8 +89,9 @@ Open http://localhost:3000.
 **Coach (you)**
 1. `/admin` — cohort overview + the trust signals that matter
 2. `/admin/users/[id]` — read the athlete's latest check-in, screenshots, and
-   memory; **write the daily decision**; log predictions, record outcomes, add
-   memory notes, and watch their trust metrics.
+   memory; **write the daily decision** (or press **Generate Coach Response** to
+   have Claude draft it, then review/edit/approve); log predictions, record
+   outcomes, add memory notes, and watch their trust metrics.
 
 ---
 
@@ -120,10 +123,19 @@ Open http://localhost:3000.
 
 ## Scope guardrails (from Task 8.75)
 
-**Intentionally NOT built:** the AI coach engine, wearable API integrations,
-ML / automatic pattern recognition, and prediction engines. The coaching is
-delivered by a human, by hand. The point is to learn whether the *decision*
-lands — not to build the machine that makes it. If the aha proves out, build
-with conviction. If it doesn't, you saved a year.
+**Intentionally NOT built:** the autonomous AI coach engine, wearable API
+integrations, ML / automatic pattern recognition, and auto-sent predictions. The
+point is to learn whether the *decision* lands — not to build the machine that
+makes it. If the aha proves out, build with conviction. If it doesn't, you saved
+a year.
 
-> Not a medical device. Not medical advice.
+**Coach-assist (in scope, human-gated):** the admin can press **Generate Coach
+Response** to have Claude draft a daily decision from the athlete's data. This is
+a *draft only* — it is saved as a draft, and you review, edit, and approve it
+before the athlete ever sees it. Nothing is auto-sent; a human controls every
+response. This reduces coach workload while keeping the wizard-of-oz quality bar.
+(Screenshot OCR is the other server-side Claude use — it reads numbers off
+uploaded screenshots into the check-in.)
+
+> Not a medical device. Not medical advice. The coach is a performance coach,
+> not a healthcare provider.
