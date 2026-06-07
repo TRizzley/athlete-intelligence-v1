@@ -8,6 +8,7 @@ import {
   StatCard,
 } from "@/components/ui";
 import { formatDate, todayISO } from "@/lib/format";
+import { AutoCoachTrigger } from "@/components/auto-coach-trigger";
 import type {
   CoachResponse,
   DailyCheckin,
@@ -100,6 +101,7 @@ export default async function DashboardPage({
 
   return (
     <PageShell width="content">
+      <AutoCoachTrigger />
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
           <div className="eyebrow mb-1.5">{formatDate(today)}</div>

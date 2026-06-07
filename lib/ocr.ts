@@ -118,6 +118,49 @@ function sanitize(raw: Record<string, unknown>): ExtractedCheckin {
   return out;
 }
 
+// Which fields each kind of screenshot is allowed to fill. This prevents
+// cross-contamination — e.g. a Whoop/Apple "calories burned" reading must never
+// land in the food-intake `calories` field, and a nutrition app must never set
+// biometrics. Anything not allowed for the source is forced back to null.
+const NUTRITION_FIELDS: (keyof ExtractedCheckin)[] = [
+  "calories",
+  "protein_g",
+  "carbs_g",
+  "fat_g",
+  "water_oz",
+];
+const BIOMETRIC_FIELDS: (keyof ExtractedCheckin)[] = [
+  "sleep_hours",
+  "sleep_quality",
+  "recovery_score",
+  "hrv_ms",
+  "resting_hr",
+];
+const WEIGHT_FIELDS: (keyof ExtractedCheckin)[] = ["body_weight_lbs"];
+
+const ALLOWED_BY_SOURCE: Record<ScreenshotSource, (keyof ExtractedCheckin)[]> = {
+  // Wearables/recovery apps: biometrics + weight only (never nutrition).
+  whoop: [...BIOMETRIC_FIELDS, ...WEIGHT_FIELDS],
+  oura: [...BIOMETRIC_FIELDS, ...WEIGHT_FIELDS],
+  garmin: [...BIOMETRIC_FIELDS, ...WEIGHT_FIELDS],
+  apple_health: [...BIOMETRIC_FIELDS, ...WEIGHT_FIELDS],
+  apple_fitness: [...BIOMETRIC_FIELDS, ...WEIGHT_FIELDS],
+  // Food logs: nutrition + weight only (never biometrics).
+  nutrition: [...NUTRITION_FIELDS, ...WEIGHT_FIELDS],
+  // Unknown source: allow everything, best effort.
+  other: EXTRACTED_FIELDS,
+};
+
+function restrictToSource(
+  e: ExtractedCheckin,
+  source: ScreenshotSource,
+): ExtractedCheckin {
+  const allowed = new Set(ALLOWED_BY_SOURCE[source] ?? EXTRACTED_FIELDS);
+  const out = {} as ExtractedCheckin;
+  for (const k of EXTRACTED_FIELDS) out[k] = allowed.has(k) ? e[k] : null;
+  return out;
+}
+
 /**
  * Extract structured check-in fields from a screenshot using Claude vision.
  * Throws on API/parse failure so the caller can record parse_status = 'error'.
@@ -172,7 +215,7 @@ export async function extractFromScreenshot(params: {
     throw new Error(`Could not parse model JSON: ${match[0].slice(0, 200)}`);
   }
 
-  return sanitize(parsed);
+  return restrictToSource(sanitize(parsed), params.source);
 }
 
 /** True if the extraction produced at least one usable value. */

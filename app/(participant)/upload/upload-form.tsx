@@ -21,6 +21,13 @@ export function UploadForm({ dateISO }: { dateISO: string }) {
     if (state.ok) {
       formRef.current?.reset();
       setResetKey((k) => k + 1);
+      // New data is in — kick off the automatic coach response (fire-and-forget;
+      // the route is idempotent and only regenerates when data has changed).
+      fetch("/api/coach/auto-respond", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      }).catch(() => {});
     }
   }, [state]);
 
