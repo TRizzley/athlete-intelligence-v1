@@ -45,6 +45,13 @@ function tsOf(s: string | null | undefined): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+// The day after a YYYY-MM-DD date (a 'tomorrow' prediction's target date).
+function nextDay(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 export async function POST(request: Request) {
   // 1. Who is calling (must be signed in). We act only on their own data.
   const session = await createClient();
@@ -171,13 +178,19 @@ export async function POST(request: Request) {
     return json({ ok: false, error: message }, 502);
   }
 
-  // 6. Replace any prior auto response for the day, then SEND the fresh one.
-  await admin
+  // 6. Replace any prior auto response for the day (and its tracked prediction),
+  //    then SEND the fresh one.
+  const { data: olds } = await admin
     .from("coach_responses")
-    .delete()
+    .select("id")
     .eq("user_id", userId)
     .eq("response_date", responseDate)
     .eq("ai_generated", true);
+  const oldIds = (olds ?? []).map((r) => (r as { id: string }).id);
+  if (oldIds.length > 0) {
+    await admin.from("predictions").delete().in("coach_response_id", oldIds);
+    await admin.from("coach_responses").delete().in("id", oldIds);
+  }
 
   const { data: inserted, error: insertError } = await admin
     .from("coach_responses")
@@ -201,6 +214,19 @@ export async function POST(request: Request) {
 
   if (insertError || !inserted) {
     return json({ ok: false, error: insertError?.message ?? "Could not save the response." }, 500);
+  }
+
+  // 7. Log a tracked, scoreable prediction so the accuracy metric fills in.
+  if (draft.prediction) {
+    await admin.from("predictions").insert({
+      user_id: userId,
+      coach_response_id: inserted.id,
+      prediction_text: draft.prediction,
+      horizon: "tomorrow",
+      confidence: draft.confidence,
+      target_date: nextDay(responseDate),
+      created_by: userId,
+    });
   }
 
   return json({ ok: true, id: inserted.id as string, sent: true });

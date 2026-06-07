@@ -170,7 +170,9 @@ async function runOcrAndFill(
   }
 }
 
-// Fill-only-empty: never overwrite a value the participant entered by hand.
+// Screenshot wins: an OCR-read value overwrites whatever is in the check-in for
+// that field (manual entries included). Only the objective fields the OCR can
+// read are touched; subjective sliders (mood/energy/etc.) are never in scope.
 async function applyExtractionToCheckin(
   supabase: DbClient,
   userId: string,
@@ -197,8 +199,8 @@ async function applyExtractionToCheckin(
 
   const patch: Record<string, unknown> = {};
   for (const k of EXTRACTED_FIELDS) {
-    const current = (existing as Record<string, unknown>)[k];
-    if (extracted[k] !== null && (current === null || current === undefined)) {
+    // Screenshot wins: overwrite whatever is there with any value the OCR read.
+    if (extracted[k] !== null) {
       patch[k] = extracted[k];
     }
   }

@@ -36,6 +36,45 @@ function refresh(userId: string) {
   revalidatePath("/admin");
 }
 
+// The day after a YYYY-MM-DD date.
+function nextDay(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+// When a coach response is SENT, log its prediction as a tracked, scoreable
+// prediction (feeds the accuracy metric). Idempotent: skips if this response
+// already has one, or if there's no prediction text.
+async function ensureTrackedPrediction(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  args: {
+    coachResponseId: string;
+    userId: string;
+    predictionText: string | null;
+    confidence: string | null;
+    responseDate: string;
+    createdBy: string;
+  },
+): Promise<void> {
+  if (!args.predictionText) return;
+  const { data: existing } = await supabase
+    .from("predictions")
+    .select("id")
+    .eq("coach_response_id", args.coachResponseId)
+    .limit(1);
+  if (existing && existing.length > 0) return;
+  await supabase.from("predictions").insert({
+    user_id: args.userId,
+    coach_response_id: args.coachResponseId,
+    prediction_text: args.predictionText,
+    horizon: "tomorrow",
+    confidence: args.confidence,
+    target_date: nextDay(args.responseDate),
+    created_by: args.createdBy,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Coach responses
 // ---------------------------------------------------------------------------
@@ -74,11 +113,35 @@ export async function saveCoachResponse(
       .update(update)
       .eq("id", responseId);
     if (error) return { error: error.message };
+    if (status === "sent") {
+      await ensureTrackedPrediction(supabase, {
+        coachResponseId: responseId,
+        userId,
+        predictionText: fields.prediction,
+        confidence: fields.confidence,
+        responseDate: fields.response_date,
+        createdBy: user.id,
+      });
+    }
   } else {
     const insert: Record<string, unknown> = { ...fields, created_by: user.id };
     if (status === "sent") insert.sent_at = new Date().toISOString();
-    const { error } = await supabase.from("coach_responses").insert(insert);
+    const { data: created, error } = await supabase
+      .from("coach_responses")
+      .insert(insert)
+      .select("id")
+      .single();
     if (error) return { error: error.message };
+    if (status === "sent" && created) {
+      await ensureTrackedPrediction(supabase, {
+        coachResponseId: created.id as string,
+        userId,
+        predictionText: fields.prediction,
+        confidence: fields.confidence,
+        responseDate: fields.response_date,
+        createdBy: user.id,
+      });
+    }
   }
 
   refresh(userId);
@@ -100,6 +163,24 @@ export async function sendCoachResponse(
     .update({ status: "sent", sent_at: new Date().toISOString() })
     .eq("id", id);
   if (error) return { error: error.message };
+
+  // Log the response's prediction as a tracked, scoreable prediction.
+  const { data: row } = await supabase
+    .from("coach_responses")
+    .select("prediction, response_date, confidence")
+    .eq("id", id)
+    .maybeSingle();
+  if (row) {
+    const r = row as { prediction: string | null; response_date: string; confidence: string | null };
+    await ensureTrackedPrediction(supabase, {
+      coachResponseId: id,
+      userId,
+      predictionText: r.prediction,
+      confidence: r.confidence,
+      responseDate: r.response_date,
+      createdBy: user.id,
+    });
+  }
 
   refresh(userId);
   return OK;
