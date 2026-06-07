@@ -1,9 +1,7 @@
 "use server";
 
-import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import {
   extractFromScreenshot,
   hasAnyValue,
@@ -13,6 +11,8 @@ import {
 import type { ScreenshotSource } from "@/lib/types";
 
 export type FormState = { error: string | null; ok?: boolean };
+
+type DbClient = Awaited<ReturnType<typeof createClient>>;
 
 const MAX_BYTES = 10 * 1024 * 1024; // ~10MB
 const ALLOWED_SOURCES = [
@@ -86,47 +86,48 @@ export async function uploadScreenshot(
     return { error: insertError?.message ?? "Could not save the upload." };
   }
 
-  // Read the numbers off the screenshot and fill the day's check-in — but do it
-  // AFTER the response is sent so the upload feels instant. `after` keeps the
-  // serverless function alive for this work on Vercel. OCR never blocks or
-  // fails the upload; any error is recorded on the screenshot row instead.
-  after(() =>
-    parseScreenshotInBackground({
-      screenshotId: inserted.id as string,
-      userId: user.id,
-      source: source as ScreenshotSource,
-      note,
-      captureDate,
-      bytes,
-      mimeType: file.type,
-    }),
-  );
+  // Read the numbers off the screenshot and fill the day's check-in. Run it
+  // synchronously (awaited) so it reliably executes and any failure is recorded
+  // on the row where we can see it. It uses the logged-in user's session — RLS
+  // lets a user update their own rows — so it does NOT depend on the service
+  // role key or a background runtime. It never throws, so a parse failure can't
+  // break the upload itself.
+  await runOcrAndFill(supabase, {
+    screenshotId: inserted.id as string,
+    userId: user.id,
+    source: source as ScreenshotSource,
+    note,
+    captureDate,
+    bytes,
+    mimeType: file.type,
+  });
 
   revalidatePath("/upload");
   revalidatePath("/dashboard");
+  revalidatePath("/admin");
   return { error: null, ok: true };
 }
 
 // ----------------------------------------------------------------------------
-// Background OCR: extract metrics from the screenshot and fill blank check-in
-// fields for the relevant date. Runs with the service-role client because the
-// request's auth context is gone by the time `after` executes.
+// OCR: extract metrics from the screenshot and fill blank check-in fields for
+// the relevant date. Best-effort — records its own status/errors and never
+// throws to the caller.
 // ----------------------------------------------------------------------------
 
-type AdminClient = ReturnType<typeof createAdminClient>;
-
-async function parseScreenshotInBackground(args: {
-  screenshotId: string;
-  userId: string;
-  source: ScreenshotSource;
-  note: string | null;
-  captureDate: string | null;
-  bytes: ArrayBuffer;
-  mimeType: string;
-}): Promise<void> {
-  const admin = createAdminClient();
+async function runOcrAndFill(
+  supabase: DbClient,
+  args: {
+    screenshotId: string;
+    userId: string;
+    source: ScreenshotSource;
+    note: string | null;
+    captureDate: string | null;
+    bytes: ArrayBuffer;
+    mimeType: string;
+  },
+): Promise<void> {
   try {
-    await admin
+    await supabase
       .from("uploaded_screenshots")
       .update({ parse_status: "processing" })
       .eq("id", args.screenshotId);
@@ -139,10 +140,10 @@ async function parseScreenshotInBackground(args: {
     });
 
     if (hasAnyValue(extracted)) {
-      await applyExtractionToCheckin(admin, args.userId, args.captureDate, extracted);
+      await applyExtractionToCheckin(supabase, args.userId, args.captureDate, extracted);
     }
 
-    await admin
+    await supabase
       .from("uploaded_screenshots")
       .update({
         parse_status: "done",
@@ -153,27 +154,32 @@ async function parseScreenshotInBackground(args: {
       .eq("id", args.screenshotId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown OCR error";
-    await admin
-      .from("uploaded_screenshots")
-      .update({
-        parse_status: "error",
-        parse_error: message.slice(0, 500),
-        parsed_at: new Date().toISOString(),
-      })
-      .eq("id", args.screenshotId);
+    console.error(`[ocr] failed for screenshot=${args.screenshotId}:`, message);
+    try {
+      await supabase
+        .from("uploaded_screenshots")
+        .update({
+          parse_status: "error",
+          parse_error: message.slice(0, 500),
+          parsed_at: new Date().toISOString(),
+        })
+        .eq("id", args.screenshotId);
+    } catch {
+      // If even the error write fails, there's nothing more we can do here.
+    }
   }
 }
 
 // Fill-only-empty: never overwrite a value the participant entered by hand.
 async function applyExtractionToCheckin(
-  admin: AdminClient,
+  supabase: DbClient,
   userId: string,
   captureDate: string | null,
   extracted: ExtractedCheckin,
 ): Promise<void> {
   const date = captureDate ?? new Date().toISOString().slice(0, 10);
 
-  const { data: existing } = await admin
+  const { data: existing } = await supabase
     .from("daily_checkins")
     .select("*")
     .eq("user_id", userId)
@@ -185,7 +191,7 @@ async function applyExtractionToCheckin(
     for (const k of EXTRACTED_FIELDS) {
       if (extracted[k] !== null) row[k] = extracted[k];
     }
-    await admin.from("daily_checkins").insert(row);
+    await supabase.from("daily_checkins").insert(row);
     return;
   }
 
@@ -198,7 +204,7 @@ async function applyExtractionToCheckin(
   }
 
   if (Object.keys(patch).length > 0) {
-    await admin.from("daily_checkins").update(patch).eq("id", (existing as { id: string }).id);
+    await supabase.from("daily_checkins").update(patch).eq("id", (existing as { id: string }).id);
   }
 }
 

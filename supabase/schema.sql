@@ -331,6 +331,11 @@ drop policy if exists screenshots_insert on public.uploaded_screenshots;
 create policy screenshots_insert on public.uploaded_screenshots for insert
   with check (user_id = auth.uid());
 
+drop policy if exists screenshots_update on public.uploaded_screenshots;
+create policy screenshots_update on public.uploaded_screenshots for update
+  using (user_id = auth.uid() or public.is_admin())
+  with check (user_id = auth.uid() or public.is_admin());
+
 drop policy if exists screenshots_delete on public.uploaded_screenshots;
 create policy screenshots_delete on public.uploaded_screenshots for delete
   using (user_id = auth.uid() or public.is_admin());
