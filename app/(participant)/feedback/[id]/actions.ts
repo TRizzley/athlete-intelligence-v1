@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export type FormState = { error: string | null };
 
@@ -28,7 +29,7 @@ export async function saveFeedback(
   // Confirm the response exists, is sent, and belongs to this user.
   const { data: resp } = await supabase
     .from("coach_responses")
-    .select("id, user_id, status")
+    .select("id, user_id, status, response_date")
     .eq("id", responseId)
     .maybeSingle();
 
@@ -52,6 +53,45 @@ export async function saveFeedback(
     .upsert(payload, { onConflict: "coach_response_id" });
 
   if (error) return { error: error.message };
+
+  // Persist the qualitative signal to coach memory so the correction actually
+  // carries into future decisions — not just this one response. We record when
+  // the athlete typed something, or when any core rating was negative. Best
+  // effort: a failure here must never block the feedback from being saved.
+  try {
+    const shortfalls: string[] = [];
+    if (payload.felt_personalized === "no") shortfalls.push("did not feel personalized");
+    else if (payload.felt_personalized === "somewhat")
+      shortfalls.push("felt only somewhat personalized");
+    if (payload.felt_accurate === "no") shortfalls.push("did not feel accurate");
+    if (payload.was_useful === "no") shortfalls.push("was not useful");
+
+    if (payload.free_text || shortfalls.length > 0) {
+      const dateStr = (resp as { response_date?: string }).response_date ?? "a recent";
+      const parts = [`Feedback on the ${dateStr} coach response:`];
+      if (shortfalls.length > 0) parts.push(`${shortfalls.join("; ")}.`);
+      if (payload.free_text) parts.push(`Athlete's words: "${payload.free_text}".`);
+
+      const admin = createAdminClient();
+      // Replace any prior feedback note for this same response (feedback is
+      // upserted, so a resubmission should refresh, not duplicate, the note).
+      const tag = `[fb:${responseId}]`;
+      await admin
+        .from("athlete_memory_notes")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("category", "feedback")
+        .like("note", `${tag}%`);
+      await admin.from("athlete_memory_notes").insert({
+        user_id: user.id,
+        category: "feedback",
+        note: `${tag} ${parts.join(" ")}`,
+        created_by: user.id,
+      });
+    }
+  } catch {
+    /* best-effort; feedback is already saved */
+  }
 
   revalidatePath(`/coach/${responseId}`);
   revalidatePath("/dashboard");

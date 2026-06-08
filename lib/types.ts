@@ -50,6 +50,12 @@ export interface AthleteProfile {
   nutrition_app: string | null;
   injuries: string | null;
   notes: string | null;
+  coaching_tone: string | null;
+  fatigue_tendency: string | null;
+  motivation: string | null;
+  coaching_wants: string | null;
+  life_context: string | null;
+  background: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -71,6 +77,12 @@ export interface DailyCheckin {
   water_oz: number | null;
   workout_completed: boolean | null;
   workout_type: string | null;
+  workout_types: string[] | null;
+  workout_split: string | null;
+  training_load: string | null;
+  top_set_lbs: number | null;
+  bed_time: string | null;
+  wake_time: string | null;
   workout_intensity: number | null;
   soreness: number | null;
   energy: number | null;
@@ -98,6 +110,69 @@ export interface UploadedScreenshot {
   parsed_json: Record<string, number | null> | null;
   parsed_at: string | null;
   parse_error: string | null;
+}
+
+export interface CoachMessage {
+  id: string;
+  user_id: string;
+  role: "athlete" | "coach";
+  body: string;
+  ai_generated: boolean;
+  created_at: string;
+}
+
+// --- Workout tracking -------------------------------------------------------
+
+export interface WorkoutDay {
+  id: string;
+  user_id: string;
+  name: string;
+  label: string | null;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkoutExercise {
+  id: string;
+  workout_day_id: string;
+  user_id: string;
+  name: string;
+  target_sets: number | null;
+  target_reps: string | null;
+  muscle_group: string | null;
+  position: number;
+  created_at: string;
+}
+
+export interface WorkoutSession {
+  id: string;
+  user_id: string;
+  workout_day_id: string | null;
+  day_name: string | null;
+  session_date: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkoutSetLog {
+  id: string;
+  session_id: string;
+  user_id: string;
+  exercise_name: string;
+  muscle_group: string | null;
+  set_number: number;
+  target_reps: string | null;
+  weight: number | null;
+  reps: number | null;
+  position: number;
+  created_at: string;
+}
+
+// A template day with its exercises loaded.
+export interface WorkoutDayWithExercises extends WorkoutDay {
+  workout_exercises: WorkoutExercise[];
 }
 
 export interface CoachResponse {

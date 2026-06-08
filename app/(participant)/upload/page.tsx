@@ -8,6 +8,32 @@ import type { UploadedScreenshot } from "@/lib/types";
 
 export const metadata = { title: "Upload screenshots — The Coach" };
 
+// Short, friendly labels for the numbers the OCR pulled off a screenshot.
+const READ_LABELS: Record<string, (v: number) => string> = {
+  recovery_score: (v) => `Recovery ${v}`,
+  hrv_ms: (v) => `HRV ${v}`,
+  resting_hr: (v) => `RHR ${v}`,
+  sleep_hours: (v) => `Sleep ${v}h`,
+  sleep_quality: (v) => `Sleep score ${v}`,
+  body_weight_lbs: (v) => `Weight ${v} lb`,
+  calories: (v) => `${v} kcal`,
+  protein_g: (v) => `P ${v}g`,
+  carbs_g: (v) => `C ${v}g`,
+  fat_g: (v) => `F ${v}g`,
+  water_oz: (v) => `Water ${v} oz`,
+};
+
+function readSummary(parsed: Record<string, number | null> | null): string[] {
+  if (!parsed) return [];
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(parsed)) {
+    if (v === null || v === undefined) continue;
+    const fmt = READ_LABELS[k];
+    out.push(fmt ? fmt(v) : `${k} ${v}`);
+  }
+  return out;
+}
+
 export default async function UploadPage() {
   const user = await requireUser();
   const supabase = await createClient();
@@ -51,56 +77,107 @@ export default async function UploadPage() {
       <UploadForm dateISO={todayISO()} />
 
       <div className="mt-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-2">
-          Your uploads ({rows.length})
-        </h2>
-
         {rows.length === 0 ? (
           <EmptyState
             title="No screenshots yet"
             body="Upload your first one above. A WHOOP recovery or Oura readiness screen is a great place to start."
           />
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {rows.map((r) => {
-              const url = urlMap.get(r.storage_path);
-              return (
-                <div
-                  key={r.id}
-                  className="group relative overflow-hidden rounded-xl border border-border bg-surface"
-                >
-                  <div className="absolute right-2 top-2 z-10 opacity-0 transition group-hover:opacity-100">
-                    <DeleteScreenshotButton id={r.id} />
-                  </div>
-                  <a href={url} target="_blank" rel="noreferrer" className="block">
-                    {url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={url}
-                        alt={SOURCE_LABELS[r.source] ?? r.source}
-                        className="aspect-[3/4] w-full bg-surface-2 object-cover"
-                      />
-                    ) : (
-                      <div className="flex aspect-[3/4] w-full items-center justify-center bg-surface-2 text-xs text-muted-2">
-                        preview unavailable
+          (() => {
+            // Group by the day the data is for so uploads don't pile up across
+            // days: the most recent day shows by default, older days collapse.
+            const dayOf = (r: UploadedScreenshot) =>
+              (r.capture_date ?? r.created_at).slice(0, 10);
+            const latestDay = rows
+              .map(dayOf)
+              .sort()
+              .at(-1);
+            const todays = rows.filter((r) => dayOf(r) === latestDay);
+            const earlier = rows.filter((r) => dayOf(r) !== latestDay);
+
+            const Grid = ({ items }: { items: UploadedScreenshot[] }) => (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {items.map((r) => {
+                  const url = urlMap.get(r.storage_path);
+                  return (
+                    <div
+                      key={r.id}
+                      className="group relative overflow-hidden rounded-xl border border-border bg-surface"
+                    >
+                      <div className="absolute right-2 top-2 z-10 opacity-0 transition group-hover:opacity-100">
+                        <DeleteScreenshotButton id={r.id} />
                       </div>
-                    )}
-                  </a>
-                  <div className="px-2.5 py-2">
-                    <div className="text-xs font-semibold text-foreground">
-                      {SOURCE_LABELS[r.source] ?? r.source}
+                      <a href={url} target="_blank" rel="noreferrer" className="block">
+                        {url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={url}
+                            alt={SOURCE_LABELS[r.source] ?? r.source}
+                            className="aspect-[3/4] w-full bg-surface-2 object-cover"
+                          />
+                        ) : (
+                          <div className="flex aspect-[3/4] w-full items-center justify-center bg-surface-2 text-xs text-muted-2">
+                            preview unavailable
+                          </div>
+                        )}
+                      </a>
+                      <div className="px-2.5 py-2">
+                        <div className="text-xs font-semibold text-foreground">
+                          {SOURCE_LABELS[r.source] ?? r.source}
+                        </div>
+                        <div className="text-[11px] text-muted-2">
+                          {r.capture_date ? formatDate(r.capture_date) : formatDate(r.created_at)}
+                        </div>
+                        {(() => {
+                          const vals = readSummary(r.parsed_json);
+                          if (r.parse_status === "pending" || r.parse_status === "processing")
+                            return (
+                              <div className="mt-1 text-[11px] text-muted-2">Reading numbers…</div>
+                            );
+                          if (r.parse_status === "error")
+                            return (
+                              <div className="mt-1 text-[11px] text-danger">Couldn&apos;t read this one</div>
+                            );
+                          if (vals.length > 0)
+                            return (
+                              <div className="mt-1 text-[11px] leading-snug text-success">
+                                {vals.join(" · ")}
+                              </div>
+                            );
+                          return (
+                            <div className="mt-1 text-[11px] text-muted-2">No numbers found</div>
+                          );
+                        })()}
+                        {r.note ? (
+                          <div className="mt-1 line-clamp-2 text-[11px] text-muted">{r.note}</div>
+                        ) : null}
+                      </div>
                     </div>
-                    <div className="text-[11px] text-muted-2">
-                      {r.capture_date ? formatDate(r.capture_date) : formatDate(r.created_at)}
+                  );
+                })}
+              </div>
+            );
+
+            return (
+              <>
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-2">
+                  {latestDay ? formatDate(latestDay) : "Latest"} ({todays.length})
+                </h2>
+                <Grid items={todays} />
+
+                {earlier.length > 0 ? (
+                  <details className="mt-6">
+                    <summary className="cursor-pointer text-sm font-medium text-muted hover:text-foreground">
+                      Earlier uploads ({earlier.length})
+                    </summary>
+                    <div className="mt-3">
+                      <Grid items={earlier} />
                     </div>
-                    {r.note ? (
-                      <div className="mt-1 line-clamp-2 text-[11px] text-muted">{r.note}</div>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                  </details>
+                ) : null}
+              </>
+            );
+          })()
         )}
       </div>
     </PageShell>

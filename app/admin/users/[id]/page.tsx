@@ -32,6 +32,8 @@ import {
   SPORTS,
   GOALS,
   TRAINING_AGES,
+  COACHING_TONES,
+  FATIGUE_TENDENCIES,
   SEXES,
   SOURCE_LABELS,
   YSN_OPTIONS,
@@ -95,7 +97,7 @@ export default async function AthleteReviewPage({
     supabase.from("predictions").select("*, prediction_outcomes(*)").eq("user_id", id).order("created_at", { ascending: false }),
     supabase.from("user_feedback").select("*, coach_responses(response_date)").eq("user_id", id).order("created_at", { ascending: false }),
     supabase.from("athlete_memory_notes").select("*").eq("user_id", id).order("created_at", { ascending: false }),
-    supabase.from("trust_metrics").select("*").eq("user_id", id).order("snapshot_date", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("trust_metrics").select("*").eq("user_id", id).order("snapshot_date", { ascending: false }).limit(30),
   ]);
 
   const profile = (profileRes.data as AthleteProfile) ?? null;
@@ -105,7 +107,8 @@ export default async function AthleteReviewPage({
   const predictions = (predictionsRes.data as PredictionWithOutcome[]) ?? [];
   const feedback = (feedbackRes.data as FeedbackJoined[]) ?? [];
   const memory = (memoryRes.data as AthleteMemoryNote[]) ?? [];
-  const snapshot = (snapshotRes.data as TrustMetricSnapshot) ?? null;
+  const snapshots = (snapshotRes.data as TrustMetricSnapshot[]) ?? []; // newest first
+  const snapshot = snapshots[0] ?? null;
 
   const latest = checkins[0] ?? null;
   const outcomes = predictions.map(firstOutcome).filter(Boolean) as PredictionOutcome[];
@@ -322,11 +325,49 @@ export default async function AthleteReviewPage({
               <MetricBar label="Would pay" value={metrics.wouldPayRate} sample={`${metrics.feedbackCount}`} goodAt={40} />
               <MetricBar label="Prediction accuracy" value={metrics.predictionAccuracy} sample={`${metrics.predictionsScored}`} goodAt={70} />
             </div>
-            <p className="mt-3 text-[11px] text-muted-2">
-              {snapshot
-                ? `Last snapshot ${formatDate(snapshot.snapshot_date)}.`
-                : "No snapshot saved yet."}
-            </p>
+            {snapshots.length > 0 ? (
+              <div className="mt-4 border-t border-border pt-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-2">
+                    Trend over time
+                  </h3>
+                  <span className="text-[10px] text-muted-2">
+                    {snapshots.length} snapshot{snapshots.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <div className="overflow-hidden rounded-lg border border-border">
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="bg-surface-2 text-muted-2">
+                        <th className="px-2 py-1.5 text-left font-medium">Date</th>
+                        <th className="px-2 py-1.5 text-right font-medium">Person.</th>
+                        <th className="px-2 py-1.5 text-right font-medium">Acc.</th>
+                        <th className="px-2 py-1.5 text-right font-medium">Pred.</th>
+                        <th className="px-2 py-1.5 text-right font-medium">Sent</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {snapshots.slice(0, 10).map((s) => (
+                        <tr key={s.id} className="text-foreground">
+                          <td className="px-2 py-1.5 text-muted">{formatDate(s.snapshot_date)}</td>
+                          <td className="px-2 py-1.5 text-right">{pct(s.aha_rate)}</td>
+                          <td className="px-2 py-1.5 text-right">{pct(s.accuracy_rate)}</td>
+                          <td className="px-2 py-1.5 text-right">{pct(s.prediction_accuracy)}</td>
+                          <td className="px-2 py-1.5 text-right text-muted">{s.responses_sent ?? 0}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-2 text-[10px] text-muted-2">
+                  Snapshots are written automatically each day an athlete is active; “Save snapshot” forces one now.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-3 text-[11px] text-muted-2">
+                No snapshot saved yet — one is written automatically when the daily decision sends.
+              </p>
+            )}
           </section>
 
           {/* Profile */}
@@ -356,6 +397,28 @@ export default async function AthleteReviewPage({
                 {profile.injuries ? (
                   <div className="col-span-2">
                     <DataPoint label="Injuries / limits" value={profile.injuries} />
+                  </div>
+                ) : null}
+                <DataPoint label="Coaching tone" value={labelFor(COACHING_TONES, profile.coaching_tone)} />
+                <DataPoint label="Under fatigue" value={labelFor(FATIGUE_TENDENCIES, profile.fatigue_tendency)} />
+                {profile.motivation ? (
+                  <div className="col-span-2">
+                    <DataPoint label="Motivation" value={profile.motivation} />
+                  </div>
+                ) : null}
+                {profile.coaching_wants ? (
+                  <div className="col-span-2">
+                    <DataPoint label="What clicks for them" value={profile.coaching_wants} />
+                  </div>
+                ) : null}
+                {profile.life_context ? (
+                  <div className="col-span-2">
+                    <DataPoint label="Life context" value={profile.life_context} />
+                  </div>
+                ) : null}
+                {profile.background ? (
+                  <div className="col-span-2">
+                    <DataPoint label="Background" value={profile.background} />
                   </div>
                 ) : null}
               </div>
@@ -472,6 +535,10 @@ export default async function AthleteReviewPage({
       </div>
     </PageShell>
   );
+}
+
+function pct(v: number | null | undefined): string {
+  return v === null || v === undefined ? "—" : `${Math.round(v)}%`;
 }
 
 function Fb({ label, value, good }: { label: string; value: string; good: boolean }) {

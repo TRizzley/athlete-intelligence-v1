@@ -27,6 +27,18 @@ export const TRAINING_AGES: { value: string; label: string; hint: string }[] = [
   { value: "advanced", label: "Advanced", hint: "3+ years, experienced & self-coached" },
 ];
 
+export const COACHING_TONES: { value: string; label: string; hint: string }[] = [
+  { value: "tough_love", label: "Tough love", hint: "Direct, demanding, hold me accountable" },
+  { value: "balanced", label: "Balanced", hint: "Straight talk, but read the room" },
+  { value: "supportive", label: "Supportive", hint: "Encouraging, meet me where I am" },
+];
+
+export const FATIGUE_TENDENCIES: { value: string; label: string; hint: string }[] = [
+  { value: "push_through", label: "Push through", hint: "I tend to override fatigue and train anyway" },
+  { value: "balanced", label: "It depends", hint: "I read it case by case" },
+  { value: "cautious", label: "Back off", hint: "I tend to rest when I feel run down" },
+];
+
 export const SEXES: { value: string; label: string }[] = [
   { value: "male", label: "Male" },
   { value: "female", label: "Female" },
@@ -53,6 +65,17 @@ export const WORKOUT_TYPES: { value: string; label: string }[] = [
   { value: "sport", label: "Sport / skill" },
   { value: "mobility", label: "Mobility / recovery" },
   { value: "rest", label: "Rest day" },
+  { value: "other", label: "Other" },
+];
+
+export const WORKOUT_SPLITS: { value: string; label: string }[] = [
+  { value: "push", label: "Push" },
+  { value: "pull", label: "Pull" },
+  { value: "legs", label: "Legs" },
+  { value: "upper", label: "Upper" },
+  { value: "lower", label: "Lower" },
+  { value: "full_body", label: "Full body" },
+  { value: "conditioning", label: "Conditioning" },
   { value: "other", label: "Other" },
 ];
 

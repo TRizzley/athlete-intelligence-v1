@@ -166,16 +166,30 @@ export function CheckPills({
 // ---------------------------------------------------------------------------
 // File picker with a lightweight preview (name + size + thumbnail).
 // ---------------------------------------------------------------------------
-export function FileField({ name, required }: { name: string; required?: boolean }) {
-  const [file, setFile] = useState<File | null>(null);
+export function FileField({
+  name,
+  required,
+  multiple,
+}: {
+  name: string;
+  required?: boolean;
+  multiple?: boolean;
+}) {
+  const [files, setFiles] = useState<File[]>([]);
   const [preview, setPreview] = useState<string | null>(null);
 
   function onChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0] ?? null;
-    setFile(f);
+    const list = Array.from(e.target.files ?? []);
+    setFiles(list);
     if (preview) URL.revokeObjectURL(preview);
-    setPreview(f && f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
+    const first = list[0] ?? null;
+    setPreview(
+      first && first.type.startsWith("image/") ? URL.createObjectURL(first) : null,
+    );
   }
+
+  const count = files.length;
+  const totalKb = files.reduce((sum, f) => sum + f.size, 0) / 1024;
 
   return (
     <label className="block cursor-pointer">
@@ -184,6 +198,7 @@ export function FileField({ name, required }: { name: string; required?: boolean
         name={name}
         accept="image/*"
         required={required}
+        multiple={multiple}
         onChange={onChange}
         className="sr-only"
       />
@@ -200,10 +215,20 @@ export function FileField({ name, required }: { name: string; required?: boolean
         )}
         <div className="min-w-0">
           <div className="truncate text-sm font-medium text-foreground">
-            {file ? file.name : "Choose a screenshot"}
+            {count === 0
+              ? multiple
+                ? "Choose screenshots"
+                : "Choose a screenshot"
+              : count === 1
+                ? files[0].name
+                : `${count} screenshots selected`}
           </div>
           <div className="text-xs text-muted-2">
-            {file ? `${(file.size / 1024).toFixed(0)} KB` : "PNG or JPG, up to ~10MB"}
+            {count === 0
+              ? multiple
+                ? "PNG or JPG — pick one or several, up to ~10MB each"
+                : "PNG or JPG, up to ~10MB"
+              : `${totalKb.toFixed(0)} KB total`}
           </div>
         </div>
       </div>

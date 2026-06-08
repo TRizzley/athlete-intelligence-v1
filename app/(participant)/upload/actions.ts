@@ -10,7 +10,7 @@ import {
 } from "@/lib/ocr";
 import type { ScreenshotSource } from "@/lib/types";
 
-export type FormState = { error: string | null; ok?: boolean };
+export type FormState = { error: string | null; ok?: boolean; message?: string };
 
 type DbClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -43,69 +43,96 @@ export async function uploadScreenshot(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Your session expired. Please sign in again." };
 
-  const file = formData.get("file");
+  // Accept one OR several files under the same "file" field (multi-select).
+  const files = formData
+    .getAll("file")
+    .filter((f): f is File => f instanceof File && f.size > 0);
   const source = String(formData.get("source") ?? "");
   const note = String(formData.get("note") ?? "").trim() || null;
   const captureDateRaw = String(formData.get("capture_date") ?? "").trim();
   const captureDate = captureDateRaw === "" ? null : captureDateRaw;
 
   if (!ALLOWED_SOURCES.includes(source))
-    return { error: "Please choose which app this screenshot is from." };
-  if (!(file instanceof File) || file.size === 0)
-    return { error: "Please choose an image to upload." };
-  if (file.size > MAX_BYTES)
-    return { error: "That image is larger than 10MB. Please pick a smaller one." };
-  if (!file.type.startsWith("image/"))
-    return { error: "Please upload an image file (PNG or JPG)." };
+    return { error: "Please choose which app these screenshots are from." };
+  if (files.length === 0)
+    return { error: "Please choose at least one image to upload." };
 
-  const path = `${user.id}/${crypto.randomUUID()}.${extFor(file)}`;
-  const bytes = await file.arrayBuffer();
+  let succeeded = 0;
+  const failures: string[] = [];
 
-  const { error: uploadError } = await supabase.storage
-    .from("screenshots")
-    .upload(path, bytes, { contentType: file.type, upsert: false });
+  // Process each file independently so one bad file doesn't sink the batch.
+  for (const file of files) {
+    const label = file.name || "screenshot";
+    if (file.size > MAX_BYTES) {
+      failures.push(`${label} is larger than 10MB`);
+      continue;
+    }
+    if (!file.type.startsWith("image/")) {
+      failures.push(`${label} isn't an image`);
+      continue;
+    }
 
-  if (uploadError) return { error: `Upload failed: ${uploadError.message}` };
+    const path = `${user.id}/${crypto.randomUUID()}.${extFor(file)}`;
+    const bytes = await file.arrayBuffer();
 
-  const { data: inserted, error: insertError } = await supabase
-    .from("uploaded_screenshots")
-    .insert({
-      user_id: user.id,
-      source,
-      storage_path: path,
-      file_name: file.name,
-      capture_date: captureDate,
+    const { error: uploadError } = await supabase.storage
+      .from("screenshots")
+      .upload(path, bytes, { contentType: file.type, upsert: false });
+
+    if (uploadError) {
+      failures.push(`${label}: ${uploadError.message}`);
+      continue;
+    }
+
+    const { data: inserted, error: insertError } = await supabase
+      .from("uploaded_screenshots")
+      .insert({
+        user_id: user.id,
+        source,
+        storage_path: path,
+        file_name: file.name,
+        capture_date: captureDate,
+        note,
+      })
+      .select("id")
+      .single();
+
+    if (insertError || !inserted) {
+      // Roll back the orphaned file if the row insert failed.
+      await supabase.storage.from("screenshots").remove([path]);
+      failures.push(`${label}: ${insertError?.message ?? "could not save"}`);
+      continue;
+    }
+
+    // Read the numbers off the screenshot and fill the day's check-in. Awaited
+    // so it reliably runs and any failure is recorded on the row. It never
+    // throws, so a parse failure can't break the upload itself.
+    await runOcrAndFill(supabase, {
+      screenshotId: inserted.id as string,
+      userId: user.id,
+      source: source as ScreenshotSource,
       note,
-    })
-    .select("id")
-    .single();
+      captureDate,
+      bytes,
+      mimeType: file.type,
+    });
 
-  if (insertError || !inserted) {
-    // Roll back the orphaned file if the row insert failed.
-    await supabase.storage.from("screenshots").remove([path]);
-    return { error: insertError?.message ?? "Could not save the upload." };
+    succeeded += 1;
   }
 
-  // Read the numbers off the screenshot and fill the day's check-in. Run it
-  // synchronously (awaited) so it reliably executes and any failure is recorded
-  // on the row where we can see it. It uses the logged-in user's session — RLS
-  // lets a user update their own rows — so it does NOT depend on the service
-  // role key or a background runtime. It never throws, so a parse failure can't
-  // break the upload itself.
-  await runOcrAndFill(supabase, {
-    screenshotId: inserted.id as string,
-    userId: user.id,
-    source: source as ScreenshotSource,
-    note,
-    captureDate,
-    bytes,
-    mimeType: file.type,
-  });
+  if (succeeded === 0) {
+    return { error: failures[0] ?? "None of the files could be uploaded." };
+  }
 
   revalidatePath("/upload");
   revalidatePath("/dashboard");
   revalidatePath("/admin");
-  return { error: null, ok: true };
+
+  const message =
+    failures.length === 0
+      ? `Uploaded ${succeeded} screenshot${succeeded === 1 ? "" : "s"}. Add more below if you like.`
+      : `Uploaded ${succeeded}, skipped ${failures.length}: ${failures.join("; ")}`;
+  return { error: null, ok: true, message };
 }
 
 // ----------------------------------------------------------------------------
@@ -170,9 +197,10 @@ async function runOcrAndFill(
   }
 }
 
-// Screenshot wins: an OCR-read value overwrites whatever is in the check-in for
-// that field (manual entries included). Only the objective fields the OCR can
-// read are touched; subjective sliders (mood/energy/etc.) are never in scope.
+// Fill only BLANK check-in fields from the screenshot — never clobber a value
+// the athlete typed (or a value an earlier screenshot already provided). Only
+// the objective fields the OCR can read are touched; subjective sliders
+// (mood/energy/etc.) are never in scope.
 async function applyExtractionToCheckin(
   supabase: DbClient,
   userId: string,
@@ -197,10 +225,13 @@ async function applyExtractionToCheckin(
     return;
   }
 
+  const current = existing as Record<string, unknown>;
   const patch: Record<string, unknown> = {};
   for (const k of EXTRACTED_FIELDS) {
-    // Screenshot wins: overwrite whatever is there with any value the OCR read.
-    if (extracted[k] !== null) {
+    const cur = current[k];
+    const isBlank = cur === null || cur === undefined || cur === "";
+    // Coalesce: only fill fields that are still blank. Manual entries win.
+    if (isBlank && extracted[k] !== null) {
       patch[k] = extracted[k];
     }
   }

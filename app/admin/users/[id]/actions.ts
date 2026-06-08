@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { computeTrustMetrics } from "@/lib/metrics";
+import { buildTrustSnapshotRow, flattenOutcomes } from "@/lib/metrics";
 import type { PredictionOutcome, UserFeedback } from "@/lib/types";
 
 export type FormState = { error: string | null; ok?: boolean };
@@ -344,16 +344,11 @@ export async function saveTrustSnapshot(
   ]);
 
   const fb = (feedback as UserFeedback[]) ?? [];
-  const preds = (predictions as { prediction_outcomes: PredictionOutcome[] | PredictionOutcome | null }[]) ?? [];
-  const outcomes: PredictionOutcome[] = [];
-  for (const p of preds) {
-    const po = p.prediction_outcomes;
-    if (!po) continue;
-    if (Array.isArray(po)) outcomes.push(...po);
-    else outcomes.push(po);
-  }
-
-  const m = computeTrustMetrics(fb, outcomes, preds.length);
+  const preds =
+    (predictions as {
+      prediction_outcomes: PredictionOutcome[] | PredictionOutcome | null;
+    }[]) ?? [];
+  const outcomes = flattenOutcomes(preds);
 
   const { count: responsesSent } = await supabase
     .from("coach_responses")
@@ -361,19 +356,19 @@ export async function saveTrustSnapshot(
     .eq("user_id", userId)
     .eq("status", "sent");
 
-  const { error } = await supabase.from("trust_metrics").insert({
-    user_id: userId,
-    responses_sent: responsesSent ?? 0,
-    feedback_count: m.feedbackCount,
-    aha_rate: m.ahaRate,
-    accuracy_rate: m.accuracyRate,
-    usefulness_rate: m.usefulnessRate,
-    would_pay_rate: m.wouldPayRate,
-    predictions_total: m.predictionsTotal,
-    predictions_correct: m.predictionsCorrect,
-    prediction_accuracy: m.predictionAccuracy,
-    created_by: user.id,
+  const row = buildTrustSnapshotRow({
+    userId,
+    date: new Date().toISOString().slice(0, 10),
+    feedback: fb,
+    outcomes,
+    predictionsTotal: preds.length,
+    responsesSent: responsesSent ?? 0,
+    createdBy: user.id,
   });
+
+  const { error } = await supabase
+    .from("trust_metrics")
+    .upsert(row, { onConflict: "user_id,snapshot_date" });
   if (error) return { error: error.message };
 
   refresh(userId);

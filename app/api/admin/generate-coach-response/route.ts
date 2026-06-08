@@ -15,7 +15,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { generateCoachDraft, type CoachContext } from "@/lib/coach-ai";
+import { generateCoachDraft, type CoachContext, type ChatTurn } from "@/lib/coach-ai";
 import { todayISO } from "@/lib/format";
 import type {
   AthleteProfile,
@@ -130,6 +130,22 @@ export async function POST(request: Request) {
     );
   }
 
+  // Recent chat (last ~7 days) so the draft reflects what the athlete told the
+  // coach between daily reports.
+  const chatSince = new Date(
+    Date.parse(responseDate + "T00:00:00Z") - 7 * 86400000,
+  ).toISOString();
+  const { data: messageRows } = await supabase
+    .from("coach_messages")
+    .select("role, body, created_at")
+    .eq("user_id", userId)
+    .gte("created_at", chatSince)
+    .order("created_at", { ascending: true })
+    .limit(40);
+  const recentMessages: ChatTurn[] = (
+    (messageRows as { role: "athlete" | "coach"; body: string }[]) ?? []
+  ).map((m) => ({ role: m.role, body: m.body }));
+
   const ctx: CoachContext = {
     athleteName: userRec.full_name || profile?.full_name || userRec.email || null,
     today: responseDate,
@@ -141,6 +157,7 @@ export async function POST(request: Request) {
     previousResponses: (responsesRes.data as CoachResponse[]) ?? [],
     predictions: (predictionsRes.data as PredictionWithOutcome[]) ?? [],
     feedback: (feedbackRes.data as UserFeedback[]) ?? [],
+    recentMessages,
   };
 
   // 4. Ask Claude for the draft.

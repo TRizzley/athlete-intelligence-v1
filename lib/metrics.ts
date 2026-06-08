@@ -54,6 +54,55 @@ export function computeTrustMetrics(
   };
 }
 
+// The column shape of a trust_metrics row to insert/upsert. Shared so the
+// automatic daily snapshot and the manual admin snapshot write identical rows.
+export interface TrustSnapshotRow {
+  user_id: string;
+  snapshot_date: string; // YYYY-MM-DD
+  responses_sent: number;
+  feedback_count: number;
+  aha_rate: number | null;
+  accuracy_rate: number | null;
+  usefulness_rate: number | null;
+  would_pay_rate: number | null;
+  predictions_total: number;
+  predictions_correct: number;
+  prediction_accuracy: number | null;
+  created_by: string | null;
+}
+
+// Build a snapshot row from already-fetched data. Pure — the caller upserts it
+// on (user_id, snapshot_date) so there is one row per athlete per day.
+export function buildTrustSnapshotRow(args: {
+  userId: string;
+  date: string;
+  feedback: UserFeedback[];
+  outcomes: PredictionOutcome[];
+  predictionsTotal: number;
+  responsesSent: number;
+  createdBy?: string | null;
+}): TrustSnapshotRow {
+  const m = computeTrustMetrics(
+    args.feedback,
+    args.outcomes,
+    args.predictionsTotal,
+  );
+  return {
+    user_id: args.userId,
+    snapshot_date: args.date,
+    responses_sent: args.responsesSent,
+    feedback_count: m.feedbackCount,
+    aha_rate: m.ahaRate,
+    accuracy_rate: m.accuracyRate,
+    usefulness_rate: m.usefulnessRate,
+    would_pay_rate: m.wouldPayRate,
+    predictions_total: m.predictionsTotal,
+    predictions_correct: m.predictionsCorrect,
+    prediction_accuracy: m.predictionAccuracy,
+    created_by: args.createdBy ?? null,
+  };
+}
+
 // Normalize a possibly-nested prediction_outcomes relation (Supabase returns
 // either an object, an array, or null depending on the join) into a flat list.
 export function flattenOutcomes(

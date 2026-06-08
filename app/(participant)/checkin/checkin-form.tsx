@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { saveCheckin, type FormState } from "./actions";
 import { Field } from "@/components/ui";
-import { Slider, RadioCards, SubmitButton } from "@/components/interactive";
-import { WORKOUT_TYPES } from "@/lib/constants";
+import { Slider, RadioCards, CheckPills, SubmitButton } from "@/components/interactive";
+import { WORKOUT_TYPES, WORKOUT_SPLITS } from "@/lib/constants";
+import { todayISO } from "@/lib/format";
 import type { DailyCheckin } from "@/lib/types";
 
 const initial: FormState = { error: null };
@@ -24,6 +25,17 @@ export function CheckinForm({
   const [state, action] = useActionState(saveCheckin, initial);
   const c = existing;
 
+  // The date defaults are computed on the server (UTC), which can be a day
+  // ahead/behind the athlete's local calendar day. Re-anchor to the browser's
+  // local "today" once mounted so the default date and the max are correct.
+  const [localToday, setLocalToday] = useState(dateISO);
+  const [checkinDate, setCheckinDate] = useState(c?.checkin_date ?? dateISO);
+  useEffect(() => {
+    const t = todayISO();
+    setLocalToday(t);
+    if (!c?.checkin_date) setCheckinDate(t);
+  }, [c?.checkin_date]);
+
   return (
     <form action={action} className="space-y-6">
       <section className="card space-y-4">
@@ -37,8 +49,9 @@ export function CheckinForm({
             id="checkin_date"
             name="checkin_date"
             type="date"
-            defaultValue={c?.checkin_date ?? dateISO}
-            max={dateISO}
+            value={checkinDate}
+            onChange={(e) => setCheckinDate(e.target.value)}
+            max={localToday}
             className="input max-w-[200px]"
           />
         </Field>
@@ -50,8 +63,14 @@ export function CheckinForm({
           Recovery &amp; sleep
         </h3>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          <Field label="Sleep (hours)" htmlFor="sleep_hours">
-            <input id="sleep_hours" name="sleep_hours" type="number" step="0.1" min="0" max="16" defaultValue={c?.sleep_hours ?? ""} className="input" placeholder="7.5" />
+          <Field label="Bed time" htmlFor="bed_time" hint="When you went to bed">
+            <input id="bed_time" name="bed_time" type="time" defaultValue={c?.bed_time ?? ""} className="input" />
+          </Field>
+          <Field label="Wake time" htmlFor="wake_time" hint="When you woke up">
+            <input id="wake_time" name="wake_time" type="time" defaultValue={c?.wake_time ?? ""} className="input" />
+          </Field>
+          <Field label="Sleep (hours)" htmlFor="sleep_hours" hint="Auto-fills from bed/wake if left blank">
+            <input id="sleep_hours" name="sleep_hours" type="number" inputMode="decimal" step="any" min="0" max="16" defaultValue={c?.sleep_hours ?? ""} className="input" placeholder="7.5" />
           </Field>
           <Field label="Recovery score" htmlFor="recovery_score" hint="0–100 (WHOOP/Oura)">
             <input id="recovery_score" name="recovery_score" type="number" min="0" max="100" defaultValue={c?.recovery_score ?? ""} className="input" placeholder="68" />
@@ -63,7 +82,7 @@ export function CheckinForm({
             <input id="resting_hr" name="resting_hr" type="number" min="0" defaultValue={c?.resting_hr ?? ""} className="input" placeholder="52" />
           </Field>
           <Field label="Body weight (lbs)" htmlFor="body_weight_lbs">
-            <input id="body_weight_lbs" name="body_weight_lbs" type="number" step="0.1" defaultValue={c?.body_weight_lbs ?? ""} className="input" placeholder="185" />
+            <input id="body_weight_lbs" name="body_weight_lbs" type="number" inputMode="decimal" step="any" defaultValue={c?.body_weight_lbs ?? ""} className="input" placeholder="185" />
           </Field>
         </div>
       </section>
@@ -76,18 +95,33 @@ export function CheckinForm({
         <Field label="Did you train (or plan to)?">
           <RadioCards name="workout_completed" options={YES_NO} defaultValue={c?.workout_completed === null || c?.workout_completed === undefined ? null : c.workout_completed ? "yes" : "no"} columns={2} />
         </Field>
+        <Field label="Workout type" hint="Pick all that apply.">
+          <CheckPills
+            name="workout_types"
+            options={WORKOUT_TYPES}
+            defaultValues={c?.workout_types ?? (c?.workout_type ? [c.workout_type] : [])}
+          />
+        </Field>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Workout type" htmlFor="workout_type">
-            <select id="workout_type" name="workout_type" defaultValue={c?.workout_type ?? ""} className="input">
+          <Field label="Split" htmlFor="workout_split" hint="What you trained today">
+            <select id="workout_split" name="workout_split" defaultValue={c?.workout_split ?? ""} className="input">
               <option value="">—</option>
-              {WORKOUT_TYPES.map((w) => (
-                <option key={w.value} value={w.value}>
-                  {w.label}
+              {WORKOUT_SPLITS.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
                 </option>
               ))}
             </select>
           </Field>
           <Slider name="workout_intensity" label="Intensity / effort (RPE)" low="Easy" high="All-out" defaultValue={c?.workout_intensity ?? 5} />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Load / key lifts" htmlFor="training_load" hint='Free text — e.g. "Squat 225x5, 245x3"'>
+            <input id="training_load" name="training_load" defaultValue={c?.training_load ?? ""} className="input" placeholder="225x5, 245x3" />
+          </Field>
+          <Field label="Top set (lbs)" htmlFor="top_set_lbs" hint="Optional — your heaviest set today">
+            <input id="top_set_lbs" name="top_set_lbs" type="number" inputMode="decimal" step="any" min="0" defaultValue={c?.top_set_lbs ?? ""} className="input" placeholder="245" />
+          </Field>
         </div>
       </section>
 
@@ -110,7 +144,7 @@ export function CheckinForm({
             <input id="fat_g" name="fat_g" type="number" min="0" defaultValue={c?.fat_g ?? ""} className="input" />
           </Field>
           <Field label="Water (oz)" htmlFor="water_oz">
-            <input id="water_oz" name="water_oz" type="number" step="1" min="0" defaultValue={c?.water_oz ?? ""} className="input" />
+            <input id="water_oz" name="water_oz" type="number" inputMode="decimal" step="any" min="0" defaultValue={c?.water_oz ?? ""} className="input" />
           </Field>
         </div>
       </section>

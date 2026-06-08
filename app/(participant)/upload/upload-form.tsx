@@ -9,6 +9,7 @@ import {
 import { Field } from "@/components/ui";
 import { FileField, SubmitButton } from "@/components/interactive";
 import { SCREENSHOT_SOURCES } from "@/lib/constants";
+import { todayISO } from "@/lib/format";
 
 const initial: FormState = { error: null };
 
@@ -16,6 +17,15 @@ export function UploadForm({ dateISO }: { dateISO: string }) {
   const [state, action] = useActionState(uploadScreenshot, initial);
   const formRef = useRef<HTMLFormElement>(null);
   const [resetKey, setResetKey] = useState(0);
+
+  // Re-anchor the date to the browser's local "today" (server renders in UTC).
+  const [localToday, setLocalToday] = useState(dateISO);
+  const [captureDate, setCaptureDate] = useState(dateISO);
+  useEffect(() => {
+    const t = todayISO();
+    setLocalToday(t);
+    setCaptureDate(t);
+  }, []);
 
   useEffect(() => {
     if (state.ok) {
@@ -51,15 +61,16 @@ export function UploadForm({ dateISO }: { dateISO: string }) {
             id="capture_date"
             name="capture_date"
             type="date"
-            defaultValue={dateISO}
-            max={dateISO}
+            value={captureDate}
+            onChange={(e) => setCaptureDate(e.target.value)}
+            max={localToday}
             className="input"
           />
         </Field>
       </div>
 
-      <Field label="Screenshot" required>
-        <FileField key={resetKey} name="file" required />
+      <Field label="Screenshots" required hint="Add one or several at once — they all use the source and date above.">
+        <FileField key={resetKey} name="file" required multiple />
       </Field>
 
       <Field label="Note (optional)" htmlFor="note">
@@ -73,13 +84,13 @@ export function UploadForm({ dateISO }: { dateISO: string }) {
       ) : null}
       {state.ok ? (
         <div className="rounded-lg border border-success/30 bg-success-soft px-3.5 py-2.5 text-sm text-success">
-          Uploaded. Add another below if you like.
+          {state.message ?? "Uploaded. Add more below if you like."}
         </div>
       ) : null}
 
       <div className="flex justify-end">
         <SubmitButton pendingText="Uploading…" variant="accent">
-          Upload screenshot
+          Upload screenshots
         </SubmitButton>
       </div>
     </form>

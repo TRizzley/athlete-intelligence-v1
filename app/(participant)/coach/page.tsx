@@ -32,12 +32,17 @@ export default async function CoachListPage() {
 
   return (
     <PageShell width="content">
-      <div className="mb-6">
-        <div className="eyebrow mb-1.5">Your coach</div>
-        <h1 className="text-2xl font-semibold tracking-tight">Daily decisions</h1>
-        <p className="mt-1.5 text-sm text-muted">
-          Every coaching response, newest first. Tap one to read it and leave feedback.
-        </p>
+      <div className="mb-6 flex items-end justify-between gap-4">
+        <div>
+          <div className="eyebrow mb-1.5">Your coach</div>
+          <h1 className="text-2xl font-semibold tracking-tight">Daily decisions</h1>
+          <p className="mt-1.5 text-sm text-muted">
+            Every coaching response, newest first. Tap one to read it and leave feedback.
+          </p>
+        </div>
+        <Link href="/coach/chat" className="btn-accent shrink-0">
+          Chat with coach
+        </Link>
       </div>
 
       {responses.length === 0 ? (

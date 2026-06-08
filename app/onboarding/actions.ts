@@ -59,6 +59,12 @@ export async function saveProfile(
     devices,
     nutrition_app: str(formData, "nutrition_app"),
     injuries: str(formData, "injuries"),
+    coaching_tone: str(formData, "coaching_tone"),
+    fatigue_tendency: str(formData, "fatigue_tendency"),
+    motivation: str(formData, "motivation"),
+    coaching_wants: str(formData, "coaching_wants"),
+    life_context: str(formData, "life_context"),
+    background: str(formData, "background"),
   };
 
   const { error: profileError } = await supabase

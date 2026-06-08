@@ -34,6 +34,22 @@ function boolOrNull(fd: FormData, key: string): boolean | null {
   return null;
 }
 
+// Hours of sleep between a bed time and a wake time ("HH:MM"), rolling past
+// midnight (e.g. 22:30 -> 06:15 = 7.75h). Rounded to two decimals.
+function sleepHoursFromTimes(bed: string, wake: string): number | null {
+  const toMin = (t: string): number | null => {
+    const [h, m] = t.split(":").map(Number);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+    return h * 60 + m;
+  };
+  const b = toMin(bed);
+  const w = toMin(wake);
+  if (b === null || w === null) return null;
+  let diff = w - b;
+  if (diff <= 0) diff += 24 * 60; // crossed midnight
+  return Math.round((diff / 60) * 100) / 100;
+}
+
 export async function saveCheckin(
   _prev: FormState,
   formData: FormData,
@@ -47,10 +63,24 @@ export async function saveCheckin(
   const checkinDate = str(formData, "checkin_date");
   if (!checkinDate) return { error: "Please choose a date." };
 
+  // Multi-select workout types; keep the legacy single column in sync (first pick).
+  const workoutTypes = formData
+    .getAll("workout_types")
+    .map(String)
+    .filter(Boolean);
+
+  // Derive sleep duration from bed/wake times when the athlete didn't type hours.
+  const bedTime = str(formData, "bed_time");
+  const wakeTime = str(formData, "wake_time");
+  let sleepHours = floatOrNull(formData, "sleep_hours");
+  if (sleepHours === null && bedTime && wakeTime) {
+    sleepHours = sleepHoursFromTimes(bedTime, wakeTime);
+  }
+
   const payload = {
     user_id: user.id,
     checkin_date: checkinDate,
-    sleep_hours: floatOrNull(formData, "sleep_hours"),
+    sleep_hours: sleepHours,
     sleep_quality: intOrNull(formData, "sleep_quality"),
     recovery_score: intOrNull(formData, "recovery_score"),
     hrv_ms: intOrNull(formData, "hrv_ms"),
@@ -62,7 +92,13 @@ export async function saveCheckin(
     fat_g: intOrNull(formData, "fat_g"),
     water_oz: floatOrNull(formData, "water_oz"),
     workout_completed: boolOrNull(formData, "workout_completed"),
-    workout_type: str(formData, "workout_type"),
+    workout_types: workoutTypes,
+    workout_type: workoutTypes[0] ?? null,
+    workout_split: str(formData, "workout_split"),
+    training_load: str(formData, "training_load"),
+    top_set_lbs: floatOrNull(formData, "top_set_lbs"),
+    bed_time: bedTime,
+    wake_time: wakeTime,
     workout_intensity: intOrNull(formData, "workout_intensity"),
     soreness: intOrNull(formData, "soreness"),
     energy: intOrNull(formData, "energy"),
