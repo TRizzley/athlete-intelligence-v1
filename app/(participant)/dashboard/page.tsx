@@ -83,6 +83,9 @@ export default async function DashboardPage({
 
   const name = firstName(recordRes.data?.full_name);
   const checkin = (checkinRes.data as DailyCheckin) ?? null;
+  // Has today's training been logged via the post-workout check-in?
+  const trained =
+    checkin?.workout_completed !== null && checkin?.workout_completed !== undefined;
   const shotsCount = shotsCountRes.count ?? 0;
   const latest = (latestRes.data as CoachResponse) ?? null;
   const predictions = (predictionsRes.data as PredictionWithOutcome[]) ?? [];
@@ -111,7 +114,12 @@ export default async function DashboardPage({
 
       {saved === "checkin" ? (
         <div className="mb-5 rounded-lg border border-success/30 bg-success-soft px-3.5 py-2.5 text-sm text-success">
-          Check-in saved. Your coach will factor it into today's decision.
+          Morning check-in saved. Your coach will factor it into today's decision.
+        </div>
+      ) : null}
+      {saved === "postworkout" ? (
+        <div className="mb-5 rounded-lg border border-success/30 bg-success-soft px-3.5 py-2.5 text-sm text-success">
+          Post-workout check-in saved. Your coach will score today's session against its prediction.
         </div>
       ) : null}
 
@@ -120,25 +128,38 @@ export default async function DashboardPage({
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-base font-semibold text-foreground">
-              {checkin ? "You're checked in for today" : "Start with today's check-in"}
+              {!checkin
+                ? "Start with your morning check-in"
+                : !trained
+                  ? "You're checked in — log your workout after you train"
+                  : "You're all logged for today"}
             </h2>
             <p className="mt-1 text-sm text-muted">
-              {checkin
-                ? "Add screenshots so your coach has the full picture."
-                : "A 60-second check-in is how your coach reads your day."}
+              {!checkin
+                ? "A 60-second morning check-in is how your coach reads your day and plans today's session."
+                : !trained
+                  ? "After your session, the post-workout check-in lets your coach score its prediction."
+                  : "Add screenshots so your coach has the full picture."}
             </p>
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2">
             <Link href="/checkin" className={checkin ? "btn-ghost" : "btn-primary"}>
-              {checkin ? "Edit check-in" : "Check in"}
+              {checkin ? "Edit check-in" : "Morning check-in"}
             </Link>
-            <Link href="/upload" className={checkin ? "btn-primary" : "btn-ghost"}>
+            <Link
+              href="/post-workout"
+              className={checkin && !trained ? "btn-primary" : "btn-ghost"}
+            >
+              {trained ? "Edit workout" : "Log workout"}
+            </Link>
+            <Link href="/upload" className="btn-ghost">
               Upload
             </Link>
           </div>
         </div>
-        <div className="mt-4 grid grid-cols-3 gap-3">
-          <StatCard label="Check-in" value={checkin ? "Done" : "Not yet"} />
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatCard label="Morning check-in" value={checkin ? "Done" : "Not yet"} />
+          <StatCard label="Workout" value={trained ? "Logged" : "Not yet"} />
           <StatCard
             label="Recovery"
             value={checkin?.recovery_score ?? "—"}

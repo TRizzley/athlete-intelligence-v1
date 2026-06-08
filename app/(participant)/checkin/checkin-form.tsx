@@ -3,17 +3,11 @@
 import { useActionState, useEffect, useState } from "react";
 import { saveCheckin, type FormState } from "./actions";
 import { Field } from "@/components/ui";
-import { Slider, RadioCards, CheckPills, SubmitButton } from "@/components/interactive";
-import { WORKOUT_TYPES, WORKOUT_SPLITS } from "@/lib/constants";
+import { Slider, SubmitButton } from "@/components/interactive";
 import { todayISO } from "@/lib/format";
 import type { DailyCheckin } from "@/lib/types";
 
 const initial: FormState = { error: null };
-
-const YES_NO = [
-  { value: "yes", label: "Yes" },
-  { value: "no", label: "No / rest" },
-];
 
 export function CheckinForm({
   existing,
@@ -57,11 +51,15 @@ export function CheckinForm({
         </Field>
       </section>
 
-      {/* Recovery & sleep */}
+      {/* This morning's recovery & sleep */}
       <section className="card space-y-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
-          Recovery &amp; sleep
+          This morning's recovery &amp; sleep
         </h3>
+        <p className="-mt-1 text-xs text-muted-2">
+          The scores you woke up with today — last night's sleep and the recovery /
+          HRV / resting HR your wearable gave you this morning. Not yesterday's.
+        </p>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           <Field label="Bed time" htmlFor="bed_time" hint="When you went to bed">
             <input id="bed_time" name="bed_time" type="time" defaultValue={c?.bed_time ?? ""} className="input" />
@@ -87,49 +85,15 @@ export function CheckinForm({
         </div>
       </section>
 
-      {/* Training */}
+      {/* Yesterday's macros (completed nutrition) */}
       <section className="card space-y-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
-          Today's training
+          Yesterday's macros
         </h3>
-        <Field label="Did you train (or plan to)?">
-          <RadioCards name="workout_completed" options={YES_NO} defaultValue={c?.workout_completed === null || c?.workout_completed === undefined ? null : c.workout_completed ? "yes" : "no"} columns={2} />
-        </Field>
-        <Field label="Workout type" hint="Pick all that apply.">
-          <CheckPills
-            name="workout_types"
-            options={WORKOUT_TYPES}
-            defaultValues={c?.workout_types ?? (c?.workout_type ? [c.workout_type] : [])}
-          />
-        </Field>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Split" htmlFor="workout_split" hint="What you trained today">
-            <select id="workout_split" name="workout_split" defaultValue={c?.workout_split ?? ""} className="input">
-              <option value="">—</option>
-              {WORKOUT_SPLITS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Slider name="workout_intensity" label="Intensity / effort (RPE)" low="Easy" high="All-out" defaultValue={c?.workout_intensity ?? 5} />
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Load / key lifts" htmlFor="training_load" hint='Free text — e.g. "Squat 225x5, 245x3"'>
-            <input id="training_load" name="training_load" defaultValue={c?.training_load ?? ""} className="input" placeholder="225x5, 245x3" />
-          </Field>
-          <Field label="Top set (lbs)" htmlFor="top_set_lbs" hint="Optional — your heaviest set today">
-            <input id="top_set_lbs" name="top_set_lbs" type="number" inputMode="decimal" step="any" min="0" defaultValue={c?.top_set_lbs ?? ""} className="input" placeholder="245" />
-          </Field>
-        </div>
-      </section>
-
-      {/* Fuel */}
-      <section className="card space-y-4">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
-          Fuel
-        </h3>
+        <p className="-mt-1 text-xs text-muted-2">
+          Your completed nutrition from yesterday. You'll log today's training
+          after you finish in the Post-workout check-in.
+        </p>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
           <Field label="Calories" htmlFor="calories">
             <input id="calories" name="calories" type="number" min="0" defaultValue={c?.calories ?? ""} className="input" />

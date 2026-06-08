@@ -22,11 +22,13 @@ export default async function CheckinPage() {
   return (
     <PageShell width="content">
       <div className="mb-6">
-        <div className="eyebrow mb-1.5">Daily check-in</div>
-        <h1 className="text-2xl font-semibold tracking-tight">How did your day go?</h1>
+        <div className="eyebrow mb-1.5">Morning check-in</div>
+        <h1 className="text-2xl font-semibold tracking-tight">How did you wake up?</h1>
         <p className="mt-1.5 text-sm text-muted">
-          Log how you slept and how the day went — anything blank is fine. Your coach
-          reads this (with your screenshots) as the results it uses to plan your next session.
+          Do this in the morning: how you slept last night, yesterday's completed
+          fuel, and how you feel right now — anything blank is fine. Your coach reads
+          this (with your screenshots) to plan today's session. You'll log how the
+          session actually went in the Post-workout check-in.
         </p>
       </div>
 

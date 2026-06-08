@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function LandingPage() {
@@ -6,6 +7,10 @@ export default async function LandingPage() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // Signed-in users shouldn't have to click through the marketing page — send
+  // them straight to their dashboard whenever they land on the root link.
+  if (user) redirect("/dashboard");
 
   return (
     <div className="mx-auto w-full max-w-content px-4">

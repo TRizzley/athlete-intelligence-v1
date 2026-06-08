@@ -534,7 +534,7 @@ export interface ChatTurn {
 
 const CHAT_SYSTEM_PROMPT = [
   "You are the athlete's personal performance coach, replying in an ongoing chat.",
-  "You have full context on this athlete (profile, recent check-ins, screenshots, logged workouts, past coaching decisions, predictions, and feedback) — it is provided in the first message. Use it: reference their actual numbers, trends, sport, goal, and known patterns so every reply feels personal.",
+  "You have full context on this athlete (profile, recent check-ins, screenshots, logged workouts, past coaching decisions, predictions, and feedback) — it is provided below. Use it: reference their actual numbers, trends, sport, goal, and known patterns so every reply feels personal.",
   "",
   "STYLE:",
   "- Talk like a sharp, warm human coach texting back. Conversational and concise — usually 1-4 sentences. No corporate tone, no bullet-point essays unless they ask for a plan.",
@@ -565,24 +565,42 @@ export async function generateCoachChatReply(
 
   const contextText = buildContextText(
     ctx,
-    "That is everything you know about this athlete. Now reply to their messages below as their coach.",
+    "That is everything you know about this athlete. Reply to their messages as their coach.",
   );
 
-  // The athlete's context goes first (as an assistant-acknowledged user turn),
-  // then the real conversation. Map athlete -> user, coach -> assistant.
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: contextText },
-    { role: "assistant", content: "Got it — I have your full picture. What's on your mind?" },
-    ...history.map((t) => ({
-      role: (t.role === "athlete" ? "user" : "assistant") as "user" | "assistant",
-      content: t.body,
-    })),
-  ];
+  // Athlete context lives in the system prompt; the messages array is just the
+  // real conversation (athlete -> user, coach -> assistant). No assistant
+  // prefill, and we guard the two hard API rules: the conversation must START
+  // with a user message and END with a user message.
+  const mapped: Anthropic.MessageParam[] = history.map((t) => ({
+    role: (t.role === "athlete" ? "user" : "assistant") as "user" | "assistant",
+    content: t.body,
+  }));
+
+  // Coalesce consecutive same-role turns. The API requires strictly alternating
+  // user/assistant roles; if a prior coach reply failed, the DB can hold two
+  // athlete messages in a row, which would otherwise be rejected.
+  const messages: Anthropic.MessageParam[] = [];
+  for (const m of mapped) {
+    const last = messages[messages.length - 1];
+    if (last && last.role === m.role && typeof last.content === "string") {
+      last.content = `${last.content}\n\n${m.content as string}`;
+    } else {
+      messages.push({ role: m.role, content: m.content });
+    }
+  }
+
+  // Drop any leading coach turns (window can start mid-thread on an assistant).
+  while (messages.length > 0 && messages[0].role !== "user") messages.shift();
+  // Ensure there is a trailing user message for the model to respond to.
+  if (messages.length === 0 || messages[messages.length - 1].role !== "user") {
+    messages.push({ role: "user", content: "(Please reply to my latest message.)" });
+  }
 
   const msg = await client.messages.create({
     model: process.env.COACH_MODEL || "claude-sonnet-4-6",
     max_tokens: 700,
-    system: CHAT_SYSTEM_PROMPT,
+    system: `${CHAT_SYSTEM_PROMPT}\n\n${contextText}`,
     messages,
   });
 

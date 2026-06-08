@@ -27,13 +27,6 @@ function floatOrNull(fd: FormData, key: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function boolOrNull(fd: FormData, key: string): boolean | null {
-  const v = str(fd, key);
-  if (v === "yes") return true;
-  if (v === "no") return false;
-  return null;
-}
-
 // Hours of sleep between a bed time and a wake time ("HH:MM"), rolling past
 // midnight (e.g. 22:30 -> 06:15 = 7.75h). Rounded to two decimals.
 function sleepHoursFromTimes(bed: string, wake: string): number | null {
@@ -63,12 +56,6 @@ export async function saveCheckin(
   const checkinDate = str(formData, "checkin_date");
   if (!checkinDate) return { error: "Please choose a date." };
 
-  // Multi-select workout types; keep the legacy single column in sync (first pick).
-  const workoutTypes = formData
-    .getAll("workout_types")
-    .map(String)
-    .filter(Boolean);
-
   // Derive sleep duration from bed/wake times when the athlete didn't type hours.
   const bedTime = str(formData, "bed_time");
   const wakeTime = str(formData, "wake_time");
@@ -77,6 +64,11 @@ export async function saveCheckin(
     sleepHours = sleepHoursFromTimes(bedTime, wakeTime);
   }
 
+  // Morning check-in: recovery/sleep (this morning), yesterday's fuel, how you
+  // feel, and notes. The training/effort fields are NOT included here — those
+  // are filled in later by the post-workout check-in. Because Supabase upsert
+  // only updates the columns we pass, omitting them leaves any post-workout data
+  // on the same dated row untouched (and vice-versa).
   const payload = {
     user_id: user.id,
     checkin_date: checkinDate,
@@ -91,15 +83,8 @@ export async function saveCheckin(
     carbs_g: intOrNull(formData, "carbs_g"),
     fat_g: intOrNull(formData, "fat_g"),
     water_oz: floatOrNull(formData, "water_oz"),
-    workout_completed: boolOrNull(formData, "workout_completed"),
-    workout_types: workoutTypes,
-    workout_type: workoutTypes[0] ?? null,
-    workout_split: str(formData, "workout_split"),
-    training_load: str(formData, "training_load"),
-    top_set_lbs: floatOrNull(formData, "top_set_lbs"),
     bed_time: bedTime,
     wake_time: wakeTime,
-    workout_intensity: intOrNull(formData, "workout_intensity"),
     soreness: intOrNull(formData, "soreness"),
     energy: intOrNull(formData, "energy"),
     mood: intOrNull(formData, "mood"),

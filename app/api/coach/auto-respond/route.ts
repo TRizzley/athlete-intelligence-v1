@@ -45,12 +45,6 @@ function json(body: Record<string, unknown>, status = 200) {
   return NextResponse.json(body, { status });
 }
 
-function tsOf(s: string | null | undefined): number {
-  if (!s) return 0;
-  const t = Date.parse(s);
-  return Number.isFinite(t) ? t : 0;
-}
-
 // The day after a YYYY-MM-DD date (a 'tomorrow' prediction's target date).
 function nextDay(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00Z");
@@ -156,25 +150,17 @@ export async function POST(request: Request) {
     return json({ ok: true, skipped: "no recent check-in to plan from" });
   }
 
-  // 4. Idempotency: only regenerate when data is newer than the last auto send.
-  //    Consider the latest check-in and any screenshots from the last ~2 days.
-  const recentCutoff = Date.parse(responseDate + "T00:00:00Z") - 2 * 86400000;
-  const dataTs = Math.max(
-    tsOf(latestCheckin.updated_at),
-    ...screenshots
-      .filter(
-        (s) =>
-          !s.capture_date ||
-          Date.parse(s.capture_date + "T00:00:00Z") >= recentCutoff,
-      )
-      .map((s) => tsOf(s.created_at)),
-    0,
-  );
+  // 4. Freeze the morning decision. Once today's decision has been generated, it
+  //    stays put for the rest of the day — later data (most importantly the
+  //    post-workout check-in) must NOT rewrite today's call. That post-workout
+  //    data instead flows into TOMORROW's decision (auto-respond reads the recent
+  //    check-ins) and into scoring today's prediction. So generate at most once
+  //    per day: if an auto response already exists for this date, leave it alone.
   const existingAuto = previousResponses.find(
     (r) => r.response_date === responseDate && r.ai_generated,
   );
-  if (existingAuto && tsOf(existingAuto.created_at) >= dataTs) {
-    return json({ ok: true, skipped: "already up to date", id: existingAuto.id });
+  if (existingAuto) {
+    return json({ ok: true, skipped: "already generated for today", id: existingAuto.id });
   }
 
   // 4b. Recent logged workouts (per-set weight + reps) for progression context.

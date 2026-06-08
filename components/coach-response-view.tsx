@@ -5,6 +5,10 @@ import { ConfidenceBadge, Prose } from "@/components/ui";
 
 // The premium "conclusions first" reading layout for a single daily coaching
 // decision. Used by the participant read page and the admin preview.
+//
+// To avoid a wall of text, everything except the hero recommendation is a
+// tap-to-expand dropdown. Native <details> elements are used so this works with
+// no client JavaScript (the component stays a server component).
 export function CoachResponseView({ response }: { response: CoachResponse }) {
   return (
     <article className="space-y-4">
@@ -18,15 +22,7 @@ export function CoachResponseView({ response }: { response: CoachResponse }) {
         <ConfidenceBadge value={response.confidence} />
       </header>
 
-      <Block label="What your coach noticed" lead>
-        <Prose text={response.what_noticed} />
-      </Block>
-
-      <Block label="Why it matters">
-        <Prose text={response.why_it_matters} />
-      </Block>
-
-      {/* The recommendation is the hero — make it unmissable. */}
+      {/* The recommendation is the hero — always visible. */}
       <div className="rounded-2xl border border-accent/40 bg-accent/10 p-5">
         <div className="eyebrow mb-2 text-accent">Today's recommendation</div>
         <div className="text-lg font-medium leading-relaxed text-foreground">
@@ -34,63 +30,84 @@ export function CoachResponseView({ response }: { response: CoachResponse }) {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-border bg-surface-2 p-5">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="eyebrow">Prediction for tomorrow</div>
-          <ConfidenceBadge value={response.confidence} />
-        </div>
-        <Prose text={response.prediction} />
-      </div>
+      {/* Everything else collapses into dropdowns to keep the card scannable. */}
+      <div className="space-y-2.5">
+        <Dropdown label="What your coach noticed" defaultOpen>
+          <Prose text={response.what_noticed} />
+        </Dropdown>
 
-      {response.athlete_question && response.athlete_question.trim() ? (
-        <div className="rounded-2xl border border-accent/30 bg-accent/5 p-5">
-          <div className="eyebrow mb-2 text-accent">One question for you</div>
-          <div className="text-base font-medium leading-relaxed text-foreground">
+        <Dropdown label="Why it matters">
+          <Prose text={response.why_it_matters} />
+        </Dropdown>
+
+        <Dropdown label="Prediction for tomorrow" badge={<ConfidenceBadge value={response.confidence} />}>
+          <Prose text={response.prediction} />
+        </Dropdown>
+
+        {response.athlete_question && response.athlete_question.trim() ? (
+          <Dropdown label="One question for you" accent>
             <Prose text={response.athlete_question} />
-          </div>
-        </div>
-      ) : null}
+          </Dropdown>
+        ) : null}
 
-      {response.data_used && response.data_used.trim() ? (
-        <details className="group rounded-xl border border-border bg-surface px-4 py-3">
-          <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-muted">
-            <span>What data your coach used</span>
-            <svg
-              className="h-4 w-4 transition group-open:rotate-180"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </summary>
-          <div className="mt-3 text-sm text-muted">
+        {response.data_used && response.data_used.trim() ? (
+          <Dropdown label="What data your coach used" muted>
             <Prose text={response.data_used} />
-          </div>
-        </details>
-      ) : null}
+          </Dropdown>
+        ) : null}
+      </div>
     </article>
   );
 }
 
-function Block({
+// A single collapsible section. Tap the header to reveal the body. `defaultOpen`
+// starts expanded; `accent` / `muted` tweak the emphasis for question vs. data.
+function Dropdown({
   label,
   children,
-  lead,
+  badge,
+  defaultOpen,
+  accent,
+  muted,
 }: {
   label: string;
   children: ReactNode;
-  lead?: boolean;
+  badge?: ReactNode;
+  defaultOpen?: boolean;
+  accent?: boolean;
+  muted?: boolean;
 }) {
+  const border = accent ? "border-accent/30 bg-accent/5" : "border-border bg-surface";
   return (
-    <section>
-      <h2 className="mb-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-2">
-        {label}
-      </h2>
-      <div className={lead ? "text-base leading-relaxed text-foreground" : "text-sm"}>
+    <details open={defaultOpen} className={`group rounded-xl border ${border} px-4 py-3`}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+        <span
+          className={`text-xs font-semibold uppercase tracking-[0.12em] ${
+            accent ? "text-accent" : "text-muted-2"
+          }`}
+        >
+          {label}
+        </span>
+        <span className="flex items-center gap-2">
+          {badge}
+          <svg
+            className="h-4 w-4 text-muted-2 transition group-open:rotate-180"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </span>
+      </summary>
+      <div
+        className={`mt-3 leading-relaxed ${
+          muted ? "text-sm text-muted" : "text-base text-foreground"
+        }`}
+      >
         {children}
       </div>
-    </section>
+    </details>
   );
 }
