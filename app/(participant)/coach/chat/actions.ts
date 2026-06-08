@@ -189,12 +189,21 @@ export async function sendMessage(
 
   try {
     const reply = await generateCoachChatReply(ctx, history);
-    await admin.from("coach_messages").insert({
+    // Writing a 'coach' row requires the service-role client (RLS forbids the
+    // athlete from inserting it). Check the result — if this insert fails (e.g.
+    // SUPABASE_SERVICE_ROLE_KEY missing in the deploy), surface it instead of
+    // silently dropping the reply.
+    const { error: replyErr } = await admin.from("coach_messages").insert({
       user_id: userId,
       role: "coach",
       body: reply,
       ai_generated: true,
     });
+    if (replyErr) {
+      throw new Error(
+        `couldn't save the reply (${replyErr.message}). This usually means the server's database key isn't configured.`,
+      );
+    }
 
     // Close the chat -> memory loop: distill any durable facts from this
     // exchange (including the reply just generated) and auto-apply them as
