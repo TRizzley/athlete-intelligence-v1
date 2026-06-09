@@ -7,7 +7,8 @@ import {
   OutcomeBadge,
   StatCard,
 } from "@/components/ui";
-import { formatDate, todayISO } from "@/lib/format";
+import { formatDate } from "@/lib/format";
+import { serverToday } from "@/lib/server-date";
 import { AutoCoachTrigger } from "@/components/auto-coach-trigger";
 import { PostWorkoutAckTrigger } from "@/components/post-workout-ack-trigger";
 import type {
@@ -39,7 +40,7 @@ export default async function DashboardPage({
   const { saved } = await searchParams;
   const user = await requireUser();
   const supabase = await createClient();
-  const today = todayISO();
+  const today = await serverToday();
 
   const [
     recordRes,

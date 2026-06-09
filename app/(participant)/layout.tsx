@@ -33,6 +33,7 @@ export default async function ParticipantLayout({
 
   return (
     <div className="min-h-screen">
+      <TimezoneCookie />
       <SiteNav name={record?.full_name} isAdmin={record?.role === "admin"} />
       <main>{children}</main>
     </div>

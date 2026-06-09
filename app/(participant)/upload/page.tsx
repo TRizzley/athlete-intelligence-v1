@@ -1,7 +1,8 @@
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageShell, EmptyState } from "@/components/ui";
-import { todayISO, formatDate } from "@/lib/format";
+import { formatDate } from "@/lib/format";
+import { serverToday } from "@/lib/server-date";
 import { SOURCE_LABELS } from "@/lib/constants";
 import { UploadForm, DeleteScreenshotButton } from "./upload-form";
 import type { UploadedScreenshot } from "@/lib/types";
@@ -37,6 +38,7 @@ function readSummary(parsed: Record<string, number | null> | null): string[] {
 export default async function UploadPage() {
   const user = await requireUser();
   const supabase = await createClient();
+  const today = await serverToday();
 
   const { data: shots } = await supabase
     .from("uploaded_screenshots")
@@ -74,7 +76,7 @@ export default async function UploadPage() {
         </p>
       </div>
 
-      <UploadForm dateISO={todayISO()} />
+      <UploadForm dateISO={today} />
 
       <div className="mt-8">
         {rows.length === 0 ? (

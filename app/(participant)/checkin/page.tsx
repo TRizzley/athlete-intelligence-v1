@@ -1,7 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageShell } from "@/components/ui";
-import { todayISO } from "@/lib/format";
+import { serverToday } from "@/lib/server-date";
 import { CheckinForm } from "./checkin-form";
 import type { DailyCheckin } from "@/lib/types";
 
@@ -10,7 +10,7 @@ export const metadata = { title: "Daily check-in — The Coach" };
 export default async function CheckinPage() {
   const user = await requireUser();
   const supabase = await createClient();
-  const date = todayISO();
+  const date = await serverToday();
 
   const { data: existing } = await supabase
     .from("daily_checkins")

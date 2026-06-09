@@ -1,7 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageShell } from "@/components/ui";
-import { todayISO } from "@/lib/format";
+import { serverToday } from "@/lib/server-date";
 import { PostWorkoutForm } from "./post-workout-form";
 import type { DailyCheckin } from "@/lib/types";
 
@@ -10,7 +10,7 @@ export const metadata = { title: "Post-workout check-in — The Coach" };
 export default async function PostWorkoutPage() {
   const user = await requireUser();
   const supabase = await createClient();
-  const date = todayISO();
+  const date = await serverToday();
 
   const [{ data: existing }, { data: dayRows }] = await Promise.all([
     supabase
