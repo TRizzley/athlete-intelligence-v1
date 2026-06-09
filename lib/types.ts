@@ -35,6 +35,8 @@ export interface AthleteProfile {
   id: string;
   user_id: string;
   full_name: string | null;
+  phone: string | null; // E.164, e.g. +15551234567 — for SMS check-in reminders
+  last_checkin_reminder_at: string | null; // idempotency for the daily reminder
   age: number | null;
   sex: Sex | null;
   height_in: number | null;

@@ -11,6 +11,7 @@ import { formatDate } from "@/lib/format";
 import { serverToday } from "@/lib/server-date";
 import { AutoCoachTrigger } from "@/components/auto-coach-trigger";
 import { PostWorkoutAckTrigger } from "@/components/post-workout-ack-trigger";
+import { AddPhonePrompt } from "@/components/add-phone-prompt";
 import type {
   CoachResponse,
   DailyCheckin,
@@ -49,6 +50,7 @@ export default async function DashboardPage({
     latestRes,
     predictionsRes,
     recentRes,
+    profileRes,
   ] = await Promise.all([
     supabase.from("users").select("full_name").eq("id", user.id).maybeSingle(),
     supabase
@@ -81,7 +83,15 @@ export default async function DashboardPage({
       .eq("user_id", user.id)
       .order("checkin_date", { ascending: false })
       .limit(5),
+    supabase
+      .from("athlete_profiles")
+      .select("phone")
+      .eq("user_id", user.id)
+      .maybeSingle(),
   ]);
+
+  // Prompt athletes who onboarded before phone capture to add their number.
+  const needsPhone = !((profileRes.data as { phone: string | null } | null)?.phone);
 
   const name = firstName(recordRes.data?.full_name);
   const checkin = (checkinRes.data as DailyCheckin) ?? null;
@@ -114,6 +124,8 @@ export default async function DashboardPage({
           <h1 className="text-2xl font-semibold tracking-tight">Hi, {name}.</h1>
         </div>
       </div>
+
+      {needsPhone ? <AddPhonePrompt /> : null}
 
       {saved === "checkin" ? (
         <div className="mb-5 rounded-lg border border-success/30 bg-success-soft px-3.5 py-2.5 text-sm text-success">

@@ -88,6 +88,8 @@ create table if not exists public.athlete_profiles (
   id                    uuid primary key default gen_random_uuid(),
   user_id               uuid not null unique references public.users(id) on delete cascade,
   full_name             text,
+  phone                 text,  -- E.164 (e.g. +15551234567) for SMS check-in reminders
+  last_checkin_reminder_at timestamptz, -- idempotency for the daily SMS reminder
   age                   int check (age between 10 and 100),
   sex                   text check (sex in ('male', 'female', 'other', 'prefer_not_to_say')),
   height_in             numeric,

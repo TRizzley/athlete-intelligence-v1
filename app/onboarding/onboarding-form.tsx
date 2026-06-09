@@ -34,16 +34,33 @@ export function OnboardingForm({
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
           About you
         </h3>
-        <Field label="Full name" htmlFor="full_name" required>
-          <input
-            id="full_name"
-            name="full_name"
-            required
-            defaultValue={p?.full_name ?? defaultName}
-            className="input"
-            placeholder="Jordan Athlete"
-          />
-        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Full name" htmlFor="full_name" required>
+            <input
+              id="full_name"
+              name="full_name"
+              required
+              defaultValue={p?.full_name ?? defaultName}
+              className="input"
+              placeholder="Jordan Athlete"
+            />
+          </Field>
+          <Field
+            label="Mobile number"
+            htmlFor="phone"
+            hint="For check-in reminder texts"
+          >
+            <input
+              id="phone"
+              name="phone"
+              type="tel"
+              inputMode="tel"
+              defaultValue={p?.phone ?? ""}
+              className="input"
+              placeholder="(555) 123-4567"
+            />
+          </Field>
+        </div>
 
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <Field label="Age" htmlFor="age">
