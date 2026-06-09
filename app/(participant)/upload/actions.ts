@@ -104,15 +104,15 @@ export async function uploadScreenshot(
       continue;
     }
 
-    // Read the numbers off the screenshot and fill the day's check-in. Awaited
-    // so it reliably runs and any failure is recorded on the row. It never
-    // throws, so a parse failure can't break the upload itself.
-    await runOcrAndFill(supabase, {
+    // Read the numbers off the screenshot and store them as a PENDING reading.
+    // They are NOT written into the check-in here — the athlete reviews and
+    // confirms first (see applyScreenshotReading), so a misread can't silently
+    // reach the coach. Awaited + never throws, so a parse failure can't break
+    // the upload itself.
+    await runOcr(supabase, {
       screenshotId: inserted.id as string,
-      userId: user.id,
       source: source as ScreenshotSource,
       note,
-      captureDate,
       bytes,
       mimeType: file.type,
     });
@@ -130,25 +130,24 @@ export async function uploadScreenshot(
 
   const message =
     failures.length === 0
-      ? `Uploaded ${succeeded} screenshot${succeeded === 1 ? "" : "s"}. Add more below if you like.`
+      ? `Uploaded ${succeeded} screenshot${succeeded === 1 ? "" : "s"}. Review the numbers we read below, then apply them.`
       : `Uploaded ${succeeded}, skipped ${failures.length}: ${failures.join("; ")}`;
   return { error: null, ok: true, message };
 }
 
 // ----------------------------------------------------------------------------
-// OCR: extract metrics from the screenshot and fill blank check-in fields for
-// the relevant date. Best-effort — records its own status/errors and never
-// throws to the caller.
+// OCR: extract metrics from the screenshot and store them as a PENDING reading.
+// Nothing is written into the check-in here — the athlete confirms first. If the
+// read found no usable values, mark it handled (applied_at) so it never sits in
+// the review queue. Best-effort: records its own status/errors, never throws.
 // ----------------------------------------------------------------------------
 
-async function runOcrAndFill(
+async function runOcr(
   supabase: DbClient,
   args: {
     screenshotId: string;
-    userId: string;
     source: ScreenshotSource;
     note: string | null;
-    captureDate: string | null;
     bytes: ArrayBuffer;
     mimeType: string;
   },
@@ -166,10 +165,6 @@ async function runOcrAndFill(
       note: args.note,
     });
 
-    if (hasAnyValue(extracted)) {
-      await applyExtractionToCheckin(supabase, args.userId, args.captureDate, extracted);
-    }
-
     await supabase
       .from("uploaded_screenshots")
       .update({
@@ -177,6 +172,8 @@ async function runOcrAndFill(
         parsed_json: extracted,
         parsed_at: new Date().toISOString(),
         parse_error: null,
+        // No values to confirm → mark handled so it skips the review queue.
+        applied_at: hasAnyValue(extracted) ? null : new Date().toISOString(),
       })
       .eq("id", args.screenshotId);
   } catch (err) {
@@ -197,48 +194,106 @@ async function runOcrAndFill(
   }
 }
 
-// Fill only BLANK check-in fields from the screenshot — never clobber a value
-// the athlete typed (or a value an earlier screenshot already provided). Only
-// the objective fields the OCR can read are touched; subjective sliders
-// (mood/energy/etc.) are never in scope.
-async function applyExtractionToCheckin(
-  supabase: DbClient,
-  userId: string,
-  captureDate: string | null,
-  extracted: ExtractedCheckin,
-): Promise<void> {
-  const date = captureDate ?? new Date().toISOString().slice(0, 10);
+// ----------------------------------------------------------------------------
+// Confirm a pending reading — the athlete reviewed (and possibly edited) the
+// numbers and is applying them to their check-in. Confirmed values WIN: the
+// fields they kept overwrite the check-in for the screenshot's date. Subjective
+// sliders (mood/energy/etc.) are never touched.
+// ----------------------------------------------------------------------------
+export async function applyScreenshotReading(
+  screenshotId: string,
+  values: Partial<Record<keyof ExtractedCheckin, number | null>>,
+): Promise<FormState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Your session expired. Please sign in again." };
+  if (!screenshotId) return { error: "Missing screenshot." };
 
-  const { data: existing } = await supabase
-    .from("daily_checkins")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("checkin_date", date)
+  const { data: shot } = await supabase
+    .from("uploaded_screenshots")
+    .select("id, user_id, capture_date, created_at")
+    .eq("id", screenshotId)
     .maybeSingle();
-
-  if (!existing) {
-    const row: Record<string, unknown> = { user_id: userId, checkin_date: date };
-    for (const k of EXTRACTED_FIELDS) {
-      if (extracted[k] !== null) row[k] = extracted[k];
-    }
-    await supabase.from("daily_checkins").insert(row);
-    return;
+  if (!shot || (shot as { user_id: string }).user_id !== user.id) {
+    return { error: "That screenshot was not found." };
   }
+  const s = shot as { capture_date: string | null; created_at: string };
+  const date = s.capture_date ?? s.created_at.slice(0, 10);
 
-  const current = existing as Record<string, unknown>;
-  const patch: Record<string, unknown> = {};
+  // Keep only valid numbers the user confirmed; build the canonical reading too.
+  const clean: Record<string, number> = {};
+  const confirmed = {} as Record<string, number | null>;
   for (const k of EXTRACTED_FIELDS) {
-    const cur = current[k];
-    const isBlank = cur === null || cur === undefined || cur === "";
-    // Coalesce: only fill fields that are still blank. Manual entries win.
-    if (isBlank && extracted[k] !== null) {
-      patch[k] = extracted[k];
+    const v = values[k];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      clean[k] = v;
+      confirmed[k] = v;
+    } else {
+      confirmed[k] = null;
     }
   }
 
-  if (Object.keys(patch).length > 0) {
-    await supabase.from("daily_checkins").update(patch).eq("id", (existing as { id: string }).id);
+  if (Object.keys(clean).length > 0) {
+    const { data: existing } = await supabase
+      .from("daily_checkins")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("checkin_date", date)
+      .maybeSingle();
+    if (existing) {
+      await supabase
+        .from("daily_checkins")
+        .update(clean)
+        .eq("id", (existing as { id: string }).id);
+    } else {
+      await supabase
+        .from("daily_checkins")
+        .insert({ user_id: user.id, checkin_date: date, ...clean });
+    }
   }
+
+  // Mark handled + store what was actually applied (so history reflects reality).
+  await supabase
+    .from("uploaded_screenshots")
+    .update({ applied_at: new Date().toISOString(), parsed_json: confirmed })
+    .eq("id", screenshotId);
+
+  revalidatePath("/upload");
+  revalidatePath("/dashboard");
+  revalidatePath("/admin");
+  return { error: null, ok: true };
+}
+
+// Dismiss a pending reading without applying it (e.g. it misread). Marks it
+// handled so it leaves the review queue; nothing is written to the check-in.
+export async function dismissScreenshotReading(
+  screenshotId: string,
+): Promise<FormState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Your session expired." };
+  if (!screenshotId) return { error: "Missing screenshot." };
+
+  const { data: shot } = await supabase
+    .from("uploaded_screenshots")
+    .select("id, user_id")
+    .eq("id", screenshotId)
+    .maybeSingle();
+  if (!shot || (shot as { user_id: string }).user_id !== user.id) {
+    return { error: "That screenshot was not found." };
+  }
+
+  await supabase
+    .from("uploaded_screenshots")
+    .update({ applied_at: new Date().toISOString() })
+    .eq("id", screenshotId);
+
+  revalidatePath("/upload");
+  return { error: null, ok: true };
 }
 
 export async function deleteScreenshot(

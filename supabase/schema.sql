@@ -163,7 +163,10 @@ create table if not exists public.uploaded_screenshots (
                check (parse_status in ('pending','processing','done','error','skipped')),
   parsed_json  jsonb,
   parsed_at    timestamptz,
-  parse_error  text
+  parse_error  text,
+  -- Null = the OCR reading is pending the athlete's review; set once confirmed
+  -- or dismissed (see supabase/add-screenshot-applied-at.sql).
+  applied_at   timestamptz
 );
 
 -- 2.5 coach_responses (hand-written daily decision)

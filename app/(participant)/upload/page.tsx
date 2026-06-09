@@ -5,6 +5,7 @@ import { formatDate } from "@/lib/format";
 import { serverToday } from "@/lib/server-date";
 import { SOURCE_LABELS } from "@/lib/constants";
 import { UploadForm, DeleteScreenshotButton } from "./upload-form";
+import { ReviewReadings } from "./review-readings";
 import type { UploadedScreenshot } from "@/lib/types";
 
 export const metadata = { title: "Upload screenshots — The Coach" };
@@ -63,6 +64,25 @@ export default async function UploadPage() {
     });
   }
 
+  // Pending OCR readings awaiting the athlete's confirmation (not yet applied to
+  // a check-in). Only those with at least one value read.
+  const pendingReadings = rows
+    .filter(
+      (r) =>
+        r.applied_at == null &&
+        r.parsed_json != null &&
+        Object.values(r.parsed_json).some((v) => v !== null && v !== undefined),
+    )
+    .map((r) => ({
+      id: r.id,
+      source: r.source,
+      capture_date: r.capture_date,
+      created_at: r.created_at,
+      file_name: r.file_name,
+      url: urlMap.get(r.storage_path) ?? null,
+      parsed: r.parsed_json as Record<string, number | null>,
+    }));
+
   return (
     <PageShell width="content">
       <div className="mb-6">
@@ -77,6 +97,10 @@ export default async function UploadPage() {
       </div>
 
       <UploadForm dateISO={today} />
+
+      <div className="mt-8">
+        <ReviewReadings readings={pendingReadings} />
+      </div>
 
       <div className="mt-8">
         {rows.length === 0 ? (

@@ -31,14 +31,9 @@ export function UploadForm({ dateISO }: { dateISO: string }) {
     if (state.ok) {
       formRef.current?.reset();
       setResetKey((k) => k + 1);
-      // New data is in — kick off the automatic coach response (fire-and-forget;
-      // the route is idempotent and only regenerates when data has changed).
-      fetch("/api/coach/auto-respond", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        // Browser-local today so the decision is dated the athlete's real day.
-        body: JSON.stringify({ date: localToday }),
-      }).catch(() => {});
+      // NOTE: we intentionally do NOT trigger the coach here anymore. The OCR
+      // reading is pending review — it isn't in the check-in yet. The coach is
+      // kicked after the athlete confirms the reading (see review-readings.tsx).
     }
   }, [state]);
 

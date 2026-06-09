@@ -113,6 +113,9 @@ export interface UploadedScreenshot {
   parsed_json: Record<string, number | null> | null;
   parsed_at: string | null;
   parse_error: string | null;
+  // Null = the OCR reading is pending the athlete's review. Set once they've
+  // confirmed (applied) or dismissed it, so it stops feeding the review queue.
+  applied_at: string | null;
 }
 
 export interface CoachMessage {
