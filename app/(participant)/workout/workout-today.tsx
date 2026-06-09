@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import {
   startSession,
   saveSession,
   discardSessionInline,
+  autosaveSetLog,
+  autosaveSessionNotes,
   type FormState,
 } from "./actions";
 import { Field } from "@/components/ui";
@@ -51,6 +53,7 @@ export function TodayWorkout({
   if (sessionIsToday && session && !changing) {
     return (
       <SessionLogger
+        key={session.id}
         session={session}
         logs={logs}
         onChangeDay={() => setChanging(true)}
@@ -153,7 +156,29 @@ function DayPicker({
 
 // ---------------------------------------------------------------------------
 // Log weight + reps for each set of today's chosen workout.
+//
+// Everything autosaves as you type (debounced), so an accidental close never
+// loses what you entered. The session stays "in progress" until you press Save,
+// which finalizes it. A progress bar + auto-focus on the first empty set let you
+// pick up exactly where you left off.
 // ---------------------------------------------------------------------------
+
+type SetValue = { weight: string; reps: string };
+const AUTOSAVE_MS = 700;
+
+function toWeight(v: string): number | null {
+  const t = v.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+function toReps(v: string): number | null {
+  const t = v.trim();
+  if (t === "") return null;
+  const n = parseInt(t, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 function SessionLogger({
   session,
   logs,
@@ -164,6 +189,66 @@ function SessionLogger({
   onChangeDay: () => void;
 }) {
   const [state, action] = useActionState(saveSession, initial);
+
+  // Live values, keyed by set-log id, seeded from what's already saved.
+  const [values, setValues] = useState<Record<string, SetValue>>(() => {
+    const init: Record<string, SetValue> = {};
+    for (const l of logs) {
+      init[l.id] = {
+        weight: l.weight === null || l.weight === undefined ? "" : String(l.weight),
+        reps: l.reps === null || l.reps === undefined ? "" : String(l.reps),
+      };
+    }
+    return init;
+  });
+  const [notes, setNotes] = useState(session.notes ?? "");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+
+  // Per-id debounce timers; a ref so re-renders don't reset them.
+  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const weightRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // Resume: on mount, jump to the first set without a weight logged.
+  useEffect(() => {
+    const firstEmpty = logs.find(
+      (l) => (values[l.id]?.weight ?? "") === "",
+    );
+    if (firstEmpty) {
+      const el = weightRefs.current[firstEmpty.id];
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+      el?.focus({ preventScroll: true });
+    }
+    // Only on first mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function scheduleSetSave(id: string, next: SetValue) {
+    setSaveState("saving");
+    if (timers.current[id]) clearTimeout(timers.current[id]);
+    timers.current[id] = setTimeout(async () => {
+      await autosaveSetLog(id, toWeight(next.weight), toReps(next.reps));
+      setSaveState("saved");
+    }, AUTOSAVE_MS);
+  }
+
+  function onField(id: string, field: keyof SetValue, v: string) {
+    setValues((prev) => {
+      const next = { ...(prev[id] ?? { weight: "", reps: "" }), [field]: v };
+      scheduleSetSave(id, next);
+      return { ...prev, [id]: next };
+    });
+  }
+
+  function onNotes(v: string) {
+    setNotes(v);
+    setSaveState("saving");
+    if (notesTimer.current) clearTimeout(notesTimer.current);
+    notesTimer.current = setTimeout(async () => {
+      await autosaveSessionNotes(session.id, v);
+      setSaveState("saved");
+    }, AUTOSAVE_MS);
+  }
 
   // Group sets by exercise, preserving order.
   const groups = useMemo(() => {
@@ -179,21 +264,40 @@ function SessionLogger({
     return out;
   }, [logs]);
 
+  // Progress = sets with any weight or reps entered.
+  const total = logs.length;
+  const done = logs.filter((l) => {
+    const v = values[l.id];
+    return v && (v.weight.trim() !== "" || v.reps.trim() !== "");
+  }).length;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+
   const logIds = logs.map((l) => l.id).join(",");
+  const isCompleted = session.status === "completed";
 
   return (
     <form action={action} className="space-y-4">
-      <div className="card space-y-1">
+      <div className="card space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
               Today&apos;s workout
             </h3>
             <p className="mt-0.5 text-lg font-semibold text-foreground">
-              {session.day_name ?? "Workout"}
+              {session.day_name ?? "Quick workout"}
             </p>
+            <p className="text-sm text-muted">{formatDate(session.session_date)}</p>
           </div>
           <div className="flex items-center gap-2">
+            <span
+              className={`pill ${
+                isCompleted
+                  ? "bg-success-soft text-success"
+                  : "bg-accent/15 text-accent"
+              }`}
+            >
+              {isCompleted ? "Saved" : "In progress"}
+            </span>
             <button type="button" onClick={onChangeDay} className="btn-ghost text-sm">
               Change day
             </button>
@@ -208,7 +312,22 @@ function SessionLogger({
             </button>
           </div>
         </div>
-        <p className="text-sm text-muted">{formatDate(session.session_date)}</p>
+
+        {/* Progress — pick up where you left off. */}
+        {total > 0 ? (
+          <div>
+            <div className="mb-1 flex items-center justify-between text-xs text-muted-2">
+              <span>{done} of {total} sets logged</span>
+              <span className="tabular-nums">{pct}%</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
+              <div
+                className="h-full rounded-full bg-accent transition-all"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <input type="hidden" name="session_id" value={session.id} />
@@ -239,12 +358,16 @@ function SessionLogger({
                   {s.set_number}
                 </span>
                 <input
+                  ref={(el) => {
+                    weightRefs.current[s.id] = el;
+                  }}
                   name={`weight_${s.id}`}
                   type="number"
                   inputMode="decimal"
                   step="any"
                   min="0"
-                  defaultValue={s.weight ?? ""}
+                  value={values[s.id]?.weight ?? ""}
+                  onChange={(e) => onField(s.id, "weight", e.target.value)}
                   placeholder="—"
                   className="input"
                 />
@@ -253,7 +376,8 @@ function SessionLogger({
                   type="number"
                   inputMode="numeric"
                   min="0"
-                  defaultValue={s.reps ?? ""}
+                  value={values[s.id]?.reps ?? ""}
+                  onChange={(e) => onField(s.id, "reps", e.target.value)}
                   placeholder={s.target_reps ?? "—"}
                   className="input"
                 />
@@ -271,7 +395,8 @@ function SessionLogger({
           <textarea
             id="notes"
             name="notes"
-            defaultValue={session.notes ?? ""}
+            value={notes}
+            onChange={(e) => onNotes(e.target.value)}
             className="input min-h-[64px]"
             placeholder="Felt strong, bumped bench 5lbs, left elbow a little cranky…"
           />
@@ -285,16 +410,20 @@ function SessionLogger({
       ) : null}
       {state.ok ? (
         <div className="rounded-lg border border-success/30 bg-success-soft px-3.5 py-2.5 text-sm text-success">
-          Saved.
+          Workout saved.
         </div>
       ) : null}
 
       <div className="sticky bottom-0 -mx-4 flex items-center gap-3 border-t border-border bg-background/85 px-4 py-3 backdrop-blur">
         <p className="mr-auto text-xs text-muted-2">
-          Weights reset each day — this is what we track over time.
+          {saveState === "saving"
+            ? "Autosaving…"
+            : saveState === "saved"
+              ? "All changes saved — nothing's lost if you close the app."
+              : "Your entries autosave as you go."}
         </p>
         <SubmitButton pendingText="Saving…" variant="accent">
-          Save workout
+          {isCompleted ? "Update workout" : "Save workout"}
         </SubmitButton>
       </div>
     </form>

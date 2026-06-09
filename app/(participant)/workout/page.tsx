@@ -31,6 +31,7 @@ export default async function WorkoutPage() {
       .from("workout_sessions")
       .select("*")
       .eq("user_id", user.id)
+      .eq("status", "completed")
       .order("session_date", { ascending: false })
       .limit(30),
   ]);

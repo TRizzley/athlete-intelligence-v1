@@ -340,16 +340,58 @@ export async function saveSession(
     ),
   );
 
-  // Optional session note.
+  // Optional session note + finalize: pressing Save marks the session completed.
   await supabase
     .from("workout_sessions")
-    .update({ notes: str(formData, "notes") })
+    .update({
+      notes: str(formData, "notes"),
+      status: "completed",
+      completed_at: new Date().toISOString(),
+    })
     .eq("id", sessionId)
     .eq("user_id", user.id);
 
   revalidatePath("/workout");
   revalidatePath("/dashboard");
   return { error: null, ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Autosave — incremental, best-effort writes so an accidental close never loses
+// what the athlete typed. The session stays 'in_progress' (pending) until Save.
+// These take plain args (called directly from the client logger), return quietly,
+// and intentionally do NOT revalidate (the client owns the live UI state).
+// ---------------------------------------------------------------------------
+
+export async function autosaveSetLog(
+  id: string,
+  weight: number | null,
+  reps: number | null,
+): Promise<{ ok: boolean }> {
+  const { supabase, user } = await uid();
+  if (!user) return { ok: false };
+  if (!id) return { ok: false };
+  await supabase
+    .from("workout_set_logs")
+    .update({ weight, reps })
+    .eq("id", id)
+    .eq("user_id", user.id);
+  return { ok: true };
+}
+
+export async function autosaveSessionNotes(
+  sessionId: string,
+  notes: string | null,
+): Promise<{ ok: boolean }> {
+  const { supabase, user } = await uid();
+  if (!user) return { ok: false };
+  if (!sessionId) return { ok: false };
+  await supabase
+    .from("workout_sessions")
+    .update({ notes: notes && notes.trim() !== "" ? notes : null })
+    .eq("id", sessionId)
+    .eq("user_id", user.id);
+  return { ok: true };
 }
 
 // Remove today's session so the athlete can pick a different day.

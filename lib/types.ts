@@ -148,6 +148,8 @@ export interface WorkoutExercise {
   created_at: string;
 }
 
+export type WorkoutSessionStatus = "in_progress" | "completed";
+
 export interface WorkoutSession {
   id: string;
   user_id: string;
@@ -155,6 +157,10 @@ export interface WorkoutSession {
   day_name: string | null;
   session_date: string;
   notes: string | null;
+  // 'in_progress' = pending/autosaving (stays open to resume); 'completed' = the
+  // athlete pressed Save. Ad-hoc "on the fly" sessions have workout_day_id null.
+  status: WorkoutSessionStatus;
+  completed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -169,6 +175,8 @@ export interface WorkoutSetLog {
   target_reps: string | null;
   weight: number | null;
   reps: number | null;
+  // Set logs sharing a non-null group are performed as a superset.
+  superset_group: string | null;
   position: number;
   created_at: string;
 }

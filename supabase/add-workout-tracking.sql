@@ -43,9 +43,11 @@ create table if not exists public.workout_sessions (
   id              uuid primary key default gen_random_uuid(),
   user_id         uuid not null references public.users(id) on delete cascade,
   workout_day_id  uuid references public.workout_days(id) on delete set null,
-  day_name        text,                 -- snapshot of the day's name
+  day_name        text,                 -- snapshot of the day's name (null = ad-hoc)
   session_date    date not null default current_date,
   notes           text,
+  status          text not null default 'in_progress', -- 'in_progress' | 'completed'
+  completed_at    timestamptz,          -- set when the athlete presses Save
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
   unique (user_id, session_date)
@@ -62,6 +64,7 @@ create table if not exists public.workout_set_logs (
   target_reps   text,
   weight        numeric,                -- the tracked value (blank until logged)
   reps          int,                    -- actual reps performed
+  superset_group text,                  -- set logs sharing a value are a superset
   position      int  not null default 0,
   created_at    timestamptz not null default now()
 );
