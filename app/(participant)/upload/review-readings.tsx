@@ -8,9 +8,25 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { applyScreenshotReading, dismissScreenshotReading } from "./actions";
-import { EXTRACTED_FIELDS } from "@/lib/ocr";
 import { SOURCE_LABELS } from "@/lib/constants";
 import { formatDate, todayISO } from "@/lib/format";
+
+// The OCR field keys, in display order. Defined locally (not imported from
+// lib/ocr) because that module loads the server-only Anthropic SDK, which must
+// never be pulled into this browser component.
+const READING_FIELDS = [
+  "sleep_hours",
+  "sleep_quality",
+  "recovery_score",
+  "hrv_ms",
+  "resting_hr",
+  "body_weight_lbs",
+  "calories",
+  "protein_g",
+  "carbs_g",
+  "fat_g",
+  "water_oz",
+] as const;
 
 type PendingReading = {
   id: string;
@@ -62,7 +78,7 @@ function ReadingCard({ reading }: { reading: PendingReading }) {
   const [error, setError] = useState<string | null>(null);
 
   // Only the fields the OCR actually read are shown — editable.
-  const fields = EXTRACTED_FIELDS.filter(
+  const fields = READING_FIELDS.filter(
     (k) => reading.parsed[k] !== null && reading.parsed[k] !== undefined,
   );
   const [edited, setEdited] = useState<Record<string, string>>(() => {
