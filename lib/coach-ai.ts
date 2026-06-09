@@ -615,6 +615,65 @@ export async function generateCoachChatReply(
 }
 
 // ----------------------------------------------------------------------------
+// Post-workout acknowledgment — a short coach note right after the athlete logs
+// their session. This is NOT a new daily decision: the morning decision stays
+// frozen. It's a brief, encouraging reaction that lands in the coach chat and
+// gives one concrete recover/refuel cue for the rest of today.
+// ----------------------------------------------------------------------------
+
+const POST_WORKOUT_ACK_SYSTEM_PROMPT = [
+  "You are the athlete's personal performance coach. They just finished training and logged a post-workout check-in. Send ONE short, warm acknowledgment — like a coach texting right after the session.",
+  "",
+  "WHAT TO DO:",
+  "- React to the session they just logged (today's training fields in the latest check-in): what they trained, how hard (intensity/RPE), their key lifts or top set, and how it lines up with the plan and prediction you made for them this morning.",
+  "- Give ONE concrete thing to do for the rest of today to recover or refuel, specific to their data (e.g. a protein/calorie target to hit, hydration, an earlier bedtime, easy mobility).",
+  "- Be genuinely encouraging but honest. If they coasted through what should've been a hard day, or hammered it against a low-recovery morning, name it kindly.",
+  "",
+  "STYLE:",
+  "- 2-4 sentences. Conversational, second person ('you'). Lead with the reaction to their session. No emojis unless they use them. No bullet lists.",
+  "- This is a one-way note in their chat — don't ask a question that needs an answer to make sense (a light rhetorical nudge is fine).",
+  "",
+  "SAFETY — non-negotiable. You are a PERFORMANCE COACH, not a healthcare provider:",
+  "- No medical advice, diagnoses, or supplement/medication guidance.",
+  "- If they logged pain, injury, or concerning symptoms, keep it conservative and point them to a qualified professional.",
+  "",
+  "Never invent data you were not given. Write ONLY the message text — nothing else.",
+].join("\n");
+
+/**
+ * Generate the coach's short post-workout acknowledgment for the athlete, given
+ * full context whose LATEST CHECK-IN is today's row (now carrying the just-logged
+ * training/effort fields). Returns the message text to post into the coach chat.
+ */
+export async function generatePostWorkoutAck(ctx: CoachContext): Promise<string> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
+
+  const client = new Anthropic({ apiKey });
+
+  const contextText = buildContextText(
+    ctx,
+    "The athlete just logged the post-workout check-in — it's the today-dated LATEST CHECK-IN above (the training/effort fields). Write your short post-workout acknowledgment now, reacting to that session.",
+  );
+
+  const msg = await client.messages.create({
+    model: process.env.COACH_MODEL || "claude-sonnet-4-6",
+    max_tokens: 400,
+    system: `${POST_WORKOUT_ACK_SYSTEM_PROMPT}\n\n${contextText}`,
+    messages: [{ role: "user", content: "Send me your post-workout note." }],
+  });
+
+  const text = msg.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("\n")
+    .trim();
+
+  if (!text) throw new Error("The coach didn't have a post-workout note.");
+  return text;
+}
+
+// ----------------------------------------------------------------------------
 // Memory distillation — turn a chat conversation into durable athlete notes.
 //
 // After a chat exchange, this reads the conversation (plus the notes we already

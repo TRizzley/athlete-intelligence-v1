@@ -91,6 +91,9 @@ export interface DailyCheckin {
   motivation: number | null;
   pain_injury_note: string | null;
   open_comments: string | null;
+  // Set when the coach has sent its short post-workout acknowledgment for this
+  // day (idempotency key — the ack is sent at most once per logged session).
+  post_workout_ack_at: string | null;
   created_at: string;
   updated_at: string;
 }

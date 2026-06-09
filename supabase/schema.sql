@@ -139,6 +139,9 @@ create table if not exists public.daily_checkins (
   motivation        int check (motivation between 1 and 10),
   pain_injury_note  text,
   open_comments     text,
+  -- Set when the coach has sent its short post-workout acknowledgment for the
+  -- day (idempotency key — see supabase/add-post-workout-ack.sql).
+  post_workout_ack_at timestamptz,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
   unique (user_id, checkin_date)

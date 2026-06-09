@@ -9,6 +9,7 @@ import {
 } from "@/components/ui";
 import { formatDate, todayISO } from "@/lib/format";
 import { AutoCoachTrigger } from "@/components/auto-coach-trigger";
+import { PostWorkoutAckTrigger } from "@/components/post-workout-ack-trigger";
 import type {
   CoachResponse,
   DailyCheckin,
@@ -105,6 +106,7 @@ export default async function DashboardPage({
   return (
     <PageShell width="content">
       <AutoCoachTrigger />
+      <PostWorkoutAckTrigger />
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
           <div className="eyebrow mb-1.5">{formatDate(today)}</div>
@@ -119,7 +121,7 @@ export default async function DashboardPage({
       ) : null}
       {saved === "postworkout" ? (
         <div className="mb-5 rounded-lg border border-success/30 bg-success-soft px-3.5 py-2.5 text-sm text-success">
-          Post-workout check-in saved. Your coach will score today's session against its prediction.
+          Post-workout check-in saved. Your coach will send you a quick note and score today&apos;s session against its prediction.
         </div>
       ) : null}
 
