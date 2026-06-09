@@ -41,20 +41,23 @@ export const EXTRACTED_FIELDS: (keyof ExtractedCheckin)[] = [
   "water_oz",
 ];
 
-// Per-source hint so the model knows what it is looking at.
+// Per-source hint so the model knows what it is looking at — including the
+// specific "read THIS, not THAT" traps that cause most misreads.
 const SOURCE_HINTS: Record<ScreenshotSource, string> = {
   whoop:
-    "A WHOOP app screenshot. Likely shows Recovery % (-> recovery_score), HRV in ms, Resting Heart Rate (RHR), and Sleep duration.",
-  oura: "An Oura Ring screenshot. Likely shows Readiness (-> recovery_score), HRV, resting heart rate, and total sleep.",
+    "A WHOOP screenshot. recovery_score = the big Recovery percentage (0-100, green/yellow/red). Do NOT use Strain (a 0-21 scale) or Sleep Performance %. hrv_ms = HRV in milliseconds; resting_hr = RHR in bpm. sleep_hours = hours ASLEEP, not time in bed.",
+  oura:
+    "An Oura Ring screenshot. recovery_score = the Readiness score (0-100). Do NOT confuse it with the Sleep score or Activity score. hrv_ms = average HRV (ms); resting_hr = resting heart rate (bpm); sleep_hours = total sleep time (hours), not time in bed.",
   garmin:
-    "A Garmin screenshot. May show Body Battery, HRV status, resting heart rate, and sleep duration.",
+    "A Garmin screenshot. resting_hr = RHR (bpm); sleep_hours = sleep duration. Body Battery is 0-100 but is a charge gauge, not a recovery score — only map it to recovery_score if there is no dedicated recovery/readiness number. HRV status is often a label, not a number; only fill hrv_ms if an actual millisecond value is shown.",
   apple_health:
-    "An Apple Health screenshot. May show resting heart rate, HRV, sleep duration, body weight, or active calories.",
+    "An Apple Health screenshot. Read resting_hr (bpm), hrv_ms (HRV SDNN in ms), sleep_hours (Time Asleep), and body_weight_lbs if shown. Any calories here are ENERGY BURNED — never put them in calories (that field is food intake only).",
   apple_fitness:
-    "An Apple Fitness screenshot. May show calories (move), workout data, or heart rate.",
+    "An Apple Fitness screenshot. Move/Active calories are ENERGY BURNED — never food intake, so leave calories null. You may read heart-rate values if clearly labeled.",
   nutrition:
-    "A nutrition / food-logging app screenshot (e.g. MyFitnessPal, Cronometer). Likely shows total Calories and macros: Protein, Carbs, Fat (grams). May show water intake.",
-  other: "A health or fitness screenshot of unknown type.",
+    "A nutrition / food-log screenshot (MyFitnessPal, Cronometer, Lose It, etc.). Read the CONSUMED/EATEN totals for the day. TRAP: MyFitnessPal's large number is usually 'Calories Remaining' (Goal − Food + Exercise) — do NOT use it; use the 'Food' / consumed total. protein_g/carbs_g/fat_g are grams EATEN (the totals row), not goals or remaining. Ignore any per-meal breakdown unless it is the daily total.",
+  other:
+    "A health or fitness screenshot of unknown type. Read only values whose meaning is unambiguous from a clear label.",
 };
 
 const ALLOWED_MIME = new Set([
@@ -64,23 +67,64 @@ const ALLOWED_MIME = new Set([
   "image/webp",
 ]);
 
-function buildPrompt(source: ScreenshotSource, note: string | null): string {
+// System prompt: how to read carefully and the unit/value rules that apply to
+// every screenshot. Source-specific traps are injected per request.
+const OCR_SYSTEM_PROMPT = [
+  "You extract numeric health/fitness metrics from a single app screenshot. Accuracy matters more than completeness — a wrong number is worse than a blank one, because it silently corrupts the athlete's coaching.",
+  "",
+  "HOW TO READ:",
+  "- Read each digit precisely. Distinguish easily-confused digits (1 vs 7, 3 vs 8, 5 vs 6, 0 vs 8, 4 vs 9).",
+  "- Match every number to its LABEL on screen — never grab a nearby number just because it's big or bold.",
+  "- If a value is blurry, cropped, partially hidden, ambiguous, or you are not sure which metric it belongs to, return null for that field. Do NOT guess, infer, average, or compute a value that isn't shown.",
+  "",
+  "UNITS & NORMALIZATION:",
+  "- Numbers only, no units. sleep_hours is decimal hours (7h 30m -> 7.5; read time ASLEEP, not time in bed).",
+  "- recovery_score / readiness are 0-100. hrv_ms in milliseconds. resting_hr in bpm.",
+  "- body_weight_lbs in pounds (convert kg: kg * 2.20462).",
+  "- calories is FOOD INTAKE in kcal (never energy burned/active calories). protein_g/carbs_g/fat_g in grams; water_oz in fluid ounces.",
+  "- sleep_quality: only fill if the app shows a clear 0-100 sleep score; rescale to 1-10 (round). Otherwise null.",
+  "",
+  "Record your reading ONLY by calling record_metrics. Omit (or null) any field you cannot read with confidence.",
+].join("\n");
+
+// Forced structured output — far more reliable than parsing free-text JSON.
+const FIELD_DESCRIPTIONS: Record<keyof ExtractedCheckin, string> = {
+  sleep_hours: "Total time asleep, decimal hours. Null if not shown.",
+  sleep_quality: "1-10, rescaled from a 0-100 sleep score only. Else null.",
+  recovery_score: "Recovery/Readiness, 0-100. Null if not shown.",
+  hrv_ms: "HRV in milliseconds. Null if only a label (no number) is shown.",
+  resting_hr: "Resting heart rate in bpm. Null if not shown.",
+  body_weight_lbs: "Body weight in pounds (convert kg). Null if not shown.",
+  calories: "Food calories CONSUMED (kcal), not remaining/goal/burned. Null if unclear.",
+  protein_g: "Protein grams eaten (daily total). Null if not shown.",
+  carbs_g: "Carbohydrate grams eaten (daily total). Null if not shown.",
+  fat_g: "Fat grams eaten (daily total). Null if not shown.",
+  water_oz: "Water intake in fluid ounces. Null if not shown.",
+};
+
+const EXTRACT_TOOL: Anthropic.Tool = {
+  name: "record_metrics",
+  description:
+    "Record the numeric metrics read from the screenshot. Use null for any value not clearly and unambiguously visible.",
+  input_schema: {
+    type: "object",
+    properties: Object.fromEntries(
+      EXTRACTED_FIELDS.map((k) => [
+        k,
+        { type: ["number", "null"], description: FIELD_DESCRIPTIONS[k] },
+      ]),
+    ) as Record<string, unknown>,
+    required: [...EXTRACTED_FIELDS],
+  },
+};
+
+function buildUserText(source: ScreenshotSource, note: string | null): string {
   return [
-    `You are reading a health/fitness app screenshot to extract metrics.`,
     `Source type: ${source}. ${SOURCE_HINTS[source] ?? SOURCE_HINTS.other}`,
-    note ? `The user added this note (use only as context, not as a data source): "${note}"` : "",
-    ``,
-    `Return ONLY a JSON object with EXACTLY these keys:`,
-    `sleep_hours, sleep_quality, recovery_score, hrv_ms, resting_hr, body_weight_lbs, calories, protein_g, carbs_g, fat_g, water_oz`,
-    ``,
-    `Rules:`,
-    `- Use numbers only (no units). sleep_hours is decimal hours (e.g. "7h 30m" -> 7.5).`,
-    `- recovery_score and readiness are 0-100. hrv_ms in milliseconds. resting_hr in bpm.`,
-    `- body_weight_lbs in pounds (convert kg if needed: kg * 2.20462).`,
-    `- calories in kcal; protein_g/carbs_g/fat_g/water_oz in grams/ounces.`,
-    `- sleep_quality: only fill if the app shows a clear 0-100 or comparable sleep score; rescale to 1-10. Otherwise null.`,
-    `- If a value is not clearly visible, return null for it. NEVER guess or infer.`,
-    `- Respond with the raw JSON object and nothing else.`,
+    note
+      ? `The user added this note (context only, not a data source): "${note}"`
+      : "",
+    `Read the screenshot and call record_metrics. Leave any field you cannot read with confidence as null.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -184,6 +228,11 @@ export async function extractFromScreenshot(params: {
   const msg = await client.messages.create({
     model: process.env.OCR_MODEL || "claude-sonnet-4-6",
     max_tokens: 1024,
+    // Deterministic: OCR should read the same screenshot the same way every time.
+    temperature: 0,
+    system: OCR_SYSTEM_PROMPT,
+    tools: [EXTRACT_TOOL],
+    tool_choice: { type: "tool", name: "record_metrics" },
     messages: [
       {
         role: "user",
@@ -192,29 +241,20 @@ export async function extractFromScreenshot(params: {
             type: "image",
             source: { type: "base64", media_type: mediaType as never, data: base64 },
           },
-          { type: "text", text: buildPrompt(params.source, params.note ?? null) },
+          { type: "text", text: buildUserText(params.source, params.note ?? null) },
         ],
       },
     ],
   });
 
-  const text = msg.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
-
-  // Pull the first JSON object out of the response, tolerating code fences.
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error(`No JSON in model response: ${text.slice(0, 200)}`);
-
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(match[0]);
-  } catch {
-    throw new Error(`Could not parse model JSON: ${match[0].slice(0, 200)}`);
+  const toolUse = msg.content.find(
+    (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+  );
+  if (!toolUse) {
+    throw new Error("OCR model did not return structured metrics. Try re-uploading.");
   }
 
+  const parsed = (toolUse.input ?? {}) as Record<string, unknown>;
   return restrictToSource(sanitize(parsed), params.source);
 }
 
