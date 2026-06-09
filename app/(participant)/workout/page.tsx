@@ -58,7 +58,8 @@ export default async function WorkoutPage() {
           <div className="eyebrow mb-1.5">Workout</div>
           <h1 className="text-2xl font-semibold tracking-tight">Train &amp; log</h1>
           <p className="mt-1.5 text-sm text-muted">
-            Pick today&apos;s day and log the weight and reps for each set.
+            Pick today&apos;s day — or start a quick workout on the fly — and log the
+            weight and reps for each set.
           </p>
         </div>
         <Link

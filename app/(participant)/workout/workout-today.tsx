@@ -1,13 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useActionState,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import {
   startSession,
+  startAdhocSession,
   saveSession,
   discardSessionInline,
   autosaveSetLog,
   autosaveSessionNotes,
+  addSetToExercise,
+  addExerciseToSession,
   type FormState,
 } from "./actions";
 import { Field } from "@/components/ui";
@@ -37,14 +47,17 @@ export function TodayWorkout({
 
   if (days.length === 0) {
     return (
-      <div className="card text-center">
-        <p className="font-medium text-foreground">No workout days yet</p>
-        <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
-          Build your split first — add your training days and the exercises in each.
-        </p>
-        <Link href="/workout/days" className="btn-accent mt-4 inline-flex">
-          Build my split
-        </Link>
+      <div className="space-y-3">
+        <div className="card text-center">
+          <p className="font-medium text-foreground">No workout days yet</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
+            Build your split first — add your training days and the exercises in each.
+          </p>
+          <Link href="/workout/days" className="btn-accent mt-4 inline-flex">
+            Build my split
+          </Link>
+        </div>
+        <AdhocStart localToday={localToday} />
       </div>
     );
   }
@@ -89,6 +102,7 @@ function DayPicker({
   const [dayId, setDayId] = useState(days[0]?.id ?? "");
 
   return (
+   <div className="space-y-3">
     <form action={action} className="card space-y-4">
       <div>
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
@@ -151,6 +165,46 @@ function DayPicker({
         .
       </p>
     </form>
+    <AdhocStart localToday={localToday} />
+   </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Start a workout "on the fly" — an empty, off-plan session you build live.
+// ---------------------------------------------------------------------------
+function AdhocStart({ localToday }: { localToday: string }) {
+  const [state, action] = useActionState(startAdhocSession, initial);
+
+  return (
+    <form action={action} className="card space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
+          Or train off-plan
+        </h3>
+        <p className="mt-1 text-sm text-muted">
+          Not one of your days? Start a quick workout and add exercises as you go.
+        </p>
+      </div>
+
+      <input type="hidden" name="session_date" value={localToday} />
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <Field label="Name (optional)" htmlFor="adhoc_name">
+          <input
+            id="adhoc_name"
+            name="name"
+            placeholder="Hotel gym, pickup session…"
+            className="input sm:w-64"
+          />
+        </Field>
+        <SubmitButton pendingText="Starting…">Start quick workout</SubmitButton>
+      </div>
+
+      {state.error ? (
+        <p className="text-sm text-danger">{state.error}</p>
+      ) : null}
+    </form>
   );
 }
 
@@ -204,6 +258,33 @@ function SessionLogger({
   const [notes, setNotes] = useState(session.notes ?? "");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 
+  // In-session editing: add a set, add an exercise, pair as a superset.
+  const [, startEdit] = useTransition();
+  const [addingExercise, setAddingExercise] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newMuscle, setNewMuscle] = useState("");
+  const [supersetPrev, setSupersetPrev] = useState(false);
+
+  function addSet(name: string, muscle: string | null, superset: string | null) {
+    startEdit(async () => {
+      await addSetToExercise(session.id, name, muscle, superset);
+    });
+  }
+
+  function submitNewExercise() {
+    const name = newName.trim();
+    if (!name) return;
+    const muscle = newMuscle.trim() || null;
+    const pairing = supersetPrev;
+    setNewName("");
+    setNewMuscle("");
+    setSupersetPrev(false);
+    setAddingExercise(false);
+    startEdit(async () => {
+      await addExerciseToSession(session.id, name, muscle, pairing);
+    });
+  }
+
   // Per-id debounce timers; a ref so re-renders don't reset them.
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -252,11 +333,21 @@ function SessionLogger({
 
   // Group sets by exercise, preserving order.
   const groups = useMemo(() => {
-    const out: { name: string; muscle: string | null; sets: WorkoutSetLog[] }[] = [];
+    const out: {
+      name: string;
+      muscle: string | null;
+      superset: string | null;
+      sets: WorkoutSetLog[];
+    }[] = [];
     for (const l of logs) {
       let g = out.find((x) => x.name === l.exercise_name);
       if (!g) {
-        g = { name: l.exercise_name, muscle: l.muscle_group, sets: [] };
+        g = {
+          name: l.exercise_name,
+          muscle: l.muscle_group,
+          superset: l.superset_group,
+          sets: [],
+        };
         out.push(g);
       }
       g.sets.push(l);
@@ -333,10 +424,26 @@ function SessionLogger({
       <input type="hidden" name="session_id" value={session.id} />
       <input type="hidden" name="log_ids" value={logIds} />
 
+      {total === 0 ? (
+        <div className="card text-center text-sm text-muted">
+          No exercises yet — add your first one below to start logging.
+        </div>
+      ) : null}
+
       {groups.map((g) => (
-        <section key={g.name} className="card space-y-3">
+        <section
+          key={g.name}
+          className={`card space-y-3 ${
+            g.superset ? "border-l-2 border-l-accent" : ""
+          }`}
+        >
           <div className="flex items-baseline justify-between">
-            <h4 className="text-sm font-semibold text-foreground">{g.name}</h4>
+            <div className="flex items-baseline gap-2">
+              <h4 className="text-sm font-semibold text-foreground">{g.name}</h4>
+              {g.superset ? (
+                <span className="pill bg-accent/15 text-accent">Superset</span>
+              ) : null}
+            </div>
             {g.muscle ? (
               <span className="pill bg-surface-3 text-muted">{g.muscle}</span>
             ) : null}
@@ -387,8 +494,98 @@ function SessionLogger({
               </div>
             ))}
           </div>
+
+          <button
+            type="button"
+            onClick={() => addSet(g.name, g.muscle, g.superset)}
+            className="text-sm font-medium text-accent hover:underline"
+          >
+            + Add set
+          </button>
         </section>
       ))}
+
+      {/* Add an exercise (or a superset) mid-workout. */}
+      {addingExercise ? (
+        <div className="card space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Exercise" htmlFor="new_exercise">
+              <input
+                id="new_exercise"
+                autoFocus
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    submitNewExercise();
+                  }
+                }}
+                placeholder="Incline DB press"
+                className="input"
+              />
+            </Field>
+            <Field label="Muscle (optional)" htmlFor="new_muscle">
+              <input
+                id="new_muscle"
+                value={newMuscle}
+                onChange={(e) => setNewMuscle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    submitNewExercise();
+                  }
+                }}
+                placeholder="chest"
+                className="input"
+              />
+            </Field>
+          </div>
+          {groups.length > 0 ? (
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-muted">
+              <input
+                type="checkbox"
+                checked={supersetPrev}
+                onChange={(e) => setSupersetPrev(e.target.checked)}
+                className="h-4 w-4 accent-accent"
+              />
+              Pair as a superset with{" "}
+              <span className="font-medium text-foreground">
+                {groups[groups.length - 1].name}
+              </span>
+            </label>
+          ) : null}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={submitNewExercise}
+              className="btn-accent text-sm"
+            >
+              Add exercise
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAddingExercise(false);
+                setNewName("");
+                setNewMuscle("");
+                setSupersetPrev(false);
+              }}
+              className="btn-ghost text-sm"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAddingExercise(true)}
+          className="w-full rounded-2xl border border-dashed border-border-strong bg-surface/40 px-4 py-3 text-sm font-medium text-muted transition hover:border-accent hover:text-foreground"
+        >
+          + Add exercise
+        </button>
+      )}
 
       <section className="card space-y-3">
         <Field label="Session notes (optional)" htmlFor="notes">

@@ -394,6 +394,153 @@ export async function autosaveSessionNotes(
   return { ok: true };
 }
 
+// ---------------------------------------------------------------------------
+// Workout on the fly + in-session editing
+// ---------------------------------------------------------------------------
+
+// Start an ad-hoc session with NO template — an empty workout the athlete builds
+// live by adding exercises/sets as they go. day_name is whatever they type (or
+// null = "Quick workout").
+export async function startAdhocSession(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const { supabase, user } = await uid();
+  if (!user) return { error: "Your session expired." };
+
+  const dateRaw = str(formData, "session_date");
+  const sessionDate =
+    dateRaw && DATE_RE.test(dateRaw) ? dateRaw : new Date().toISOString().slice(0, 10);
+  const name = str(formData, "name"); // optional, e.g. "Hotel gym"
+
+  // One session per day — replace any existing one for the date (cascades logs).
+  const { data: existing } = await supabase
+    .from("workout_sessions")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("session_date", sessionDate)
+    .maybeSingle();
+  if (existing) {
+    await supabase
+      .from("workout_sessions")
+      .delete()
+      .eq("id", (existing as { id: string }).id);
+  }
+
+  const { error } = await supabase.from("workout_sessions").insert({
+    user_id: user.id,
+    workout_day_id: null,
+    day_name: name,
+    session_date: sessionDate,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/workout");
+  redirect("/workout");
+}
+
+// Append another set to an exercise already in the session. Keeps it grouped
+// with that exercise (position just after its current last set).
+export async function addSetToExercise(
+  sessionId: string,
+  exerciseName: string,
+  muscleGroup: string | null,
+  supersetGroup: string | null,
+): Promise<void> {
+  const { supabase, user } = await uid();
+  if (!user || !sessionId || !exerciseName) return;
+
+  const { data: rows } = await supabase
+    .from("workout_set_logs")
+    .select("set_number, position, target_reps")
+    .eq("session_id", sessionId)
+    .eq("user_id", user.id)
+    .eq("exercise_name", exerciseName)
+    .order("position", { ascending: false });
+
+  const last = rows?.[0] as
+    | { set_number: number; position: number; target_reps: string | null }
+    | undefined;
+  const nextSet = (last?.set_number ?? 0) + 1;
+  const nextPos = (last?.position ?? 0) + 1;
+
+  await supabase.from("workout_set_logs").insert({
+    session_id: sessionId,
+    user_id: user.id,
+    exercise_name: exerciseName,
+    muscle_group: muscleGroup,
+    set_number: nextSet,
+    target_reps: last?.target_reps ?? null,
+    weight: null,
+    reps: null,
+    superset_group: supersetGroup,
+    position: nextPos,
+  });
+
+  revalidatePath("/workout");
+}
+
+// Add a brand-new exercise to the session (its first set). Optionally pair it as
+// a superset with the previous exercise.
+export async function addExerciseToSession(
+  sessionId: string,
+  name: string,
+  muscleGroup: string | null,
+  supersetWithPrevious: boolean,
+): Promise<void> {
+  const { supabase, user } = await uid();
+  if (!user || !sessionId) return;
+  const exerciseName = name.trim();
+  if (!exerciseName) return;
+
+  const { data: rows } = await supabase
+    .from("workout_set_logs")
+    .select("position, exercise_name, superset_group")
+    .eq("session_id", sessionId)
+    .eq("user_id", user.id)
+    .order("position", { ascending: true });
+
+  const all =
+    (rows as { position: number; exercise_name: string; superset_group: string | null }[]) ??
+    [];
+  const maxPos = all.length > 0 ? all[all.length - 1].position : -100;
+  // Start each exercise on its own hundred-block so added sets have room.
+  const nextPos = Math.floor(maxPos / 100) * 100 + 100;
+
+  // Superset: share a group id with the exercise above it. If that one has no
+  // group yet, mint one and tag both.
+  let supersetGroup: string | null = null;
+  if (supersetWithPrevious && all.length > 0) {
+    const prev = all[all.length - 1];
+    if (prev.superset_group) {
+      supersetGroup = prev.superset_group;
+    } else {
+      supersetGroup = crypto.randomUUID();
+      await supabase
+        .from("workout_set_logs")
+        .update({ superset_group: supersetGroup })
+        .eq("session_id", sessionId)
+        .eq("user_id", user.id)
+        .eq("exercise_name", prev.exercise_name);
+    }
+  }
+
+  await supabase.from("workout_set_logs").insert({
+    session_id: sessionId,
+    user_id: user.id,
+    exercise_name: exerciseName,
+    muscle_group: muscleGroup,
+    set_number: 1,
+    target_reps: null,
+    weight: null,
+    reps: null,
+    superset_group: supersetGroup,
+    position: nextPos,
+  });
+
+  revalidatePath("/workout");
+}
+
 // Remove today's session so the athlete can pick a different day.
 export async function clearSession(
   _prev: FormState,
