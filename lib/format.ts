@@ -9,6 +9,23 @@ export function todayISO(): string {
   return new Date(d.getTime() - tz).toISOString().slice(0, 10);
 }
 
+// Today's calendar date (YYYY-MM-DD) in a specific IANA timezone, e.g.
+// "America/New_York". Used server-side (which runs in UTC) so a page can render
+// the athlete's real local day. Falls back to the runtime's date on bad input.
+export function todayInTz(tz: string): string {
+  try {
+    // en-CA renders as YYYY-MM-DD.
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  } catch {
+    return todayISO();
+  }
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
   // Handle plain YYYY-MM-DD without timezone drift.

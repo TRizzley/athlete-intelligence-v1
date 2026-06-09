@@ -7,6 +7,7 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { todayISO } from "@/lib/format";
 
 export function AutoCoachTrigger() {
   const router = useRouter();
@@ -21,7 +22,9 @@ export function AutoCoachTrigger() {
         const res = await fetch("/api/coach/auto-respond", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: "{}",
+          // Send the browser's LOCAL today so the decision is dated the athlete's
+          // real day — the server runs in UTC and would otherwise roll over early.
+          body: JSON.stringify({ date: todayISO() }),
         });
         const data = (await res.json().catch(() => null)) as
           | { ok?: boolean; sent?: boolean }

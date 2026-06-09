@@ -1,9 +1,9 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { sendMessage, type FormState } from "./actions";
 import { SubmitButton } from "@/components/interactive";
-import { relativeTime } from "@/lib/format";
+import { relativeTime, todayISO } from "@/lib/format";
 import type { CoachMessage } from "@/lib/types";
 
 const initial: FormState = { error: null };
@@ -12,6 +12,11 @@ export function Chat({ messages }: { messages: CoachMessage[] }) {
   const [state, action, isPending] = useActionState(sendMessage, initial);
   const bottomRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // The browser's local today, sent with the message so the coach's "today" is
+  // the athlete's real day (set after mount to avoid a hydration mismatch).
+  const [localToday, setLocalToday] = useState("");
+  useEffect(() => setLocalToday(todayISO()), []);
 
   // Keep the latest message in view as the conversation grows or while waiting.
   useEffect(() => {
@@ -55,6 +60,7 @@ export function Chat({ messages }: { messages: CoachMessage[] }) {
         action={action}
         className="sticky bottom-0 mt-4 -mx-4 border-t border-border bg-background/90 px-4 py-3 backdrop-blur"
       >
+        <input type="hidden" name="client_date" value={localToday} />
         <div className="flex items-end gap-2">
           <textarea
             // Remount (clear) once new messages land after a successful send.

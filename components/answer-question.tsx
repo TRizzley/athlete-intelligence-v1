@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { sendMessage, type FormState } from "@/app/(participant)/coach/chat/actions";
 import { SubmitButton } from "@/components/interactive";
+import { todayISO } from "@/lib/format";
 
 const initial: FormState = { error: null };
 
@@ -18,6 +19,10 @@ export function AnswerQuestion({
 }) {
   const [state, action] = useActionState(sendMessage, initial);
   const [answer, setAnswer] = useState("");
+
+  // Browser-local today so the coach's reply is anchored to the athlete's day.
+  const [localToday, setLocalToday] = useState("");
+  useEffect(() => setLocalToday(todayISO()), []);
 
   // We send the question + the answer as one message so the coach's reply has
   // the full context (the chat history doesn't include the daily-decision question).
@@ -45,6 +50,7 @@ export function AnswerQuestion({
 
       {/* Send the composed question+answer as the chat message body. */}
       <input type="hidden" name="body" value={composed} />
+      <input type="hidden" name="client_date" value={localToday} />
 
       <textarea
         rows={3}

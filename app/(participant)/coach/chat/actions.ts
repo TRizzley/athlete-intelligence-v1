@@ -37,6 +37,14 @@ export async function sendMessage(
   if (!body) return { error: "Type a message first." };
   if (body.length > 4000) return { error: "That message is a bit long — try trimming it." };
 
+  // The browser sends its LOCAL today so the coach's sense of "today" matches the
+  // athlete's real day — this server action runs in UTC and would otherwise be off
+  // by a day in the evening. Fall back to the server date if it's missing/invalid.
+  const clientDateRaw = String(formData.get("client_date") ?? "");
+  const localToday = /^\d{4}-\d{2}-\d{2}$/.test(clientDateRaw)
+    ? clientDateRaw
+    : todayISO();
+
   // 1. Save the athlete's message (RLS allows posting your own 'athlete' rows).
   const { error: insertErr } = await supabase.from("coach_messages").insert({
     user_id: user.id,
@@ -167,7 +175,7 @@ export async function sendMessage(
 
   const ctx: CoachContext = {
     athleteName: userRec?.full_name || profile?.full_name || userRec?.email || null,
-    today: todayISO(),
+    today: localToday,
     profile,
     latestCheckin: checkins[0] ?? null,
     recentCheckins: checkins,

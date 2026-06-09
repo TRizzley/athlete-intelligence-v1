@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "@/components/site-nav";
+import { TimezoneCookie } from "@/components/timezone-cookie";
 
 // Shared chrome for all participant-facing pages. Also enforces that a user
 // has completed onboarding before they can use the daily loop.

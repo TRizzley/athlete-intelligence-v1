@@ -36,7 +36,8 @@ export function UploadForm({ dateISO }: { dateISO: string }) {
       fetch("/api/coach/auto-respond", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: "{}",
+        // Browser-local today so the decision is dated the athlete's real day.
+        body: JSON.stringify({ date: localToday }),
       }).catch(() => {});
     }
   }, [state]);
