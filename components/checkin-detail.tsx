@@ -26,7 +26,7 @@ export function CheckinDetail({ checkin }: { checkin: DailyCheckin }) {
         <DataPoint label="Intensity" value={sub(c.workout_intensity)} />
       </Group>
 
-      <Group title="Fuel">
+      <Group title="Total Macros">
         <DataPoint label="Calories" value={c.calories ?? "—"} />
         <DataPoint label="Protein" value={c.protein_g ? `${c.protein_g} g` : "—"} />
         <DataPoint label="Carbs" value={c.carbs_g ? `${c.carbs_g} g` : "—"} />

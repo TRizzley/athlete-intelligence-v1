@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageShell, BackLink } from "@/components/ui";
 import { CoachResponseView } from "@/components/coach-response-view";
+import { AnswerQuestion } from "@/components/answer-question";
 import { labelFor } from "@/lib/constants";
 import { YSN_OPTIONS, WOULD_PAY_OPTIONS, PREDICTION_FEEDBACK_OPTIONS } from "@/lib/constants";
 import type { CoachResponse, UserFeedback } from "@/lib/types";
@@ -49,8 +50,15 @@ export default async function CoachResponsePage({
       ) : null}
 
       <div className="card">
-        <CoachResponseView response={r} />
+        <CoachResponseView response={r} hideQuestion={!!r.athlete_question} />
       </div>
+
+      {/* The coach's question for the athlete — answerable inline. */}
+      {r.athlete_question && r.athlete_question.trim() ? (
+        <div className="mt-5">
+          <AnswerQuestion question={r.athlete_question} />
+        </div>
+      ) : null}
 
       {/* Feedback call-to-action / summary */}
       <div className="mt-5">

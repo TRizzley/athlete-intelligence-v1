@@ -9,7 +9,15 @@ import { ConfidenceBadge, Prose } from "@/components/ui";
 // To avoid a wall of text, everything except the hero recommendation is a
 // tap-to-expand dropdown. Native <details> elements are used so this works with
 // no client JavaScript (the component stays a server component).
-export function CoachResponseView({ response }: { response: CoachResponse }) {
+export function CoachResponseView({
+  response,
+  hideQuestion = false,
+}: {
+  response: CoachResponse;
+  // When the page renders its own interactive "answer your coach" box, hide the
+  // read-only question dropdown here so the question isn't shown twice.
+  hideQuestion?: boolean;
+}) {
   return (
     <article className="space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
@@ -44,7 +52,7 @@ export function CoachResponseView({ response }: { response: CoachResponse }) {
           <Prose text={response.prediction} />
         </Dropdown>
 
-        {response.athlete_question && response.athlete_question.trim() ? (
+        {!hideQuestion && response.athlete_question && response.athlete_question.trim() ? (
           <Dropdown label="One question for you" accent>
             <Prose text={response.athlete_question} />
           </Dropdown>

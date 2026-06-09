@@ -62,3 +62,7 @@ If the Vercel build **fails**, open that deployment's log, copy the error, and f
 - **Tested a fix and it "still didn't work"?** Check *where* you're testing. A fix that's only on your computer won't appear on the phone/public site until it's pushed and deployed.
 - The `.next` folder is a build cache. Deleting it forces a clean rebuild and fixes most "my change isn't showing" problems locally.
 - CRLF/LF warnings on `git add` are harmless on Windows — ignore them.
+- **The coach chat / daily decisions work locally but not in production?** This is almost always the `SUPABASE_SERVICE_ROLE_KEY` in Vercel being missing or *wrong*. Anything the server writes on your behalf (coach replies, daily decisions) uses the service-role "admin" client, which needs that exact key. If your own actions (saving a check-in, sending a message) work but the coach never responds, the admin key is the suspect.
+  - **How to confirm:** Supabase → Logs → API. A bad key shows your own requests as `201/200` but every admin request (`coach_messages` POST, `daily_checkins` GET, etc.) as **401**.
+  - **Fix:** copy the `service_role` key from Supabase → Settings → API, paste it into Vercel → Settings → Environment Variables → `SUPABASE_SERVICE_ROLE_KEY` (no extra spaces/line breaks, and make sure it's the long `service_role` key, NOT the `anon` key), then redeploy.
+  - Env-var changes in Vercel only apply after a **new deployment** — redeploy or push a commit.

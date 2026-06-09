@@ -12,12 +12,23 @@ export default async function PostWorkoutPage() {
   const supabase = await createClient();
   const date = todayISO();
 
-  const { data: existing } = await supabase
-    .from("daily_checkins")
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("checkin_date", date)
-    .maybeSingle();
+  const [{ data: existing }, { data: dayRows }] = await Promise.all([
+    supabase
+      .from("daily_checkins")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("checkin_date", date)
+      .maybeSingle(),
+    supabase
+      .from("workout_days")
+      .select("name, label")
+      .eq("user_id", user.id)
+      .order("position", { ascending: true }),
+  ]);
+
+  const dayNames = ((dayRows as { name: string; label: string | null }[]) ?? [])
+    .map((d) => d.name)
+    .filter(Boolean);
 
   return (
     <PageShell width="content">
@@ -30,7 +41,11 @@ export default async function PostWorkoutPage() {
         </p>
       </div>
 
-      <PostWorkoutForm existing={(existing as DailyCheckin) ?? null} dateISO={date} />
+      <PostWorkoutForm
+        existing={(existing as DailyCheckin) ?? null}
+        dateISO={date}
+        dayNames={dayNames}
+      />
     </PageShell>
   );
 }

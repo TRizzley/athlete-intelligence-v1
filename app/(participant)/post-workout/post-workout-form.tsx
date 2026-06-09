@@ -4,7 +4,7 @@ import { useActionState, useEffect, useState } from "react";
 import { savePostWorkout, type FormState } from "./actions";
 import { Field } from "@/components/ui";
 import { Slider, RadioCards, CheckPills, SubmitButton } from "@/components/interactive";
-import { WORKOUT_TYPES, WORKOUT_SPLITS } from "@/lib/constants";
+import { WORKOUT_TYPES } from "@/lib/constants";
 import { todayISO } from "@/lib/format";
 import type { DailyCheckin } from "@/lib/types";
 
@@ -18,12 +18,22 @@ const YES_NO = [
 export function PostWorkoutForm({
   existing,
   dateISO,
+  dayNames = [],
 }: {
   existing: DailyCheckin | null;
   dateISO: string;
+  dayNames?: string[];
 }) {
   const [state, action] = useActionState(savePostWorkout, initial);
   const c = existing;
+
+  // The split options are the athlete's own named workout days. If a previously
+  // saved split isn't in that list (e.g. an old value, or a since-renamed day),
+  // keep it as an option so the saved value still shows and isn't silently lost.
+  const splitOptions = [...dayNames];
+  if (c?.workout_split && !splitOptions.includes(c.workout_split)) {
+    splitOptions.unshift(c.workout_split);
+  }
 
   // Re-anchor the default date to the browser's local "today" once mounted, so
   // it matches the morning check-in's date even if the server's UTC day differs.
@@ -85,15 +95,20 @@ export function PostWorkoutForm({
           />
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Split" htmlFor="workout_split" hint="What you trained today">
+          <Field label="Split" htmlFor="workout_split" hint="Which of your workout days">
             <select id="workout_split" name="workout_split" defaultValue={c?.workout_split ?? ""} className="input">
               <option value="">—</option>
-              {WORKOUT_SPLITS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
+              {splitOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
                 </option>
               ))}
             </select>
+            {dayNames.length === 0 ? (
+              <p className="mt-1.5 text-xs text-muted-2">
+                No workout days yet — build your split under Workout to see them here.
+              </p>
+            ) : null}
           </Field>
           <Slider name="workout_intensity" label="Intensity / effort (RPE)" low="Easy" high="All-out" defaultValue={c?.workout_intensity ?? 5} />
         </div>
