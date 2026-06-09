@@ -37,6 +37,7 @@ export interface AthleteProfile {
   full_name: string | null;
   phone: string | null; // E.164, e.g. +15551234567 — for SMS check-in reminders
   last_checkin_reminder_at: string | null; // idempotency for the daily reminder
+  day14_report_sent_at: string | null; // when the Day-14 analytical report was sent
   age: number | null;
   sex: Sex | null;
   height_in: number | null;

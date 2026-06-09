@@ -90,6 +90,7 @@ create table if not exists public.athlete_profiles (
   full_name             text,
   phone                 text,  -- E.164 (e.g. +15551234567) for SMS check-in reminders
   last_checkin_reminder_at timestamptz, -- idempotency for the daily SMS reminder
+  day14_report_sent_at  timestamptz, -- when the background Day-14 report was sent
   age                   int check (age between 10 and 100),
   sex                   text check (sex in ('male', 'female', 'other', 'prefer_not_to_say')),
   height_in             numeric,

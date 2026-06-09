@@ -674,6 +674,66 @@ export async function generatePostWorkoutAck(ctx: CoachContext): Promise<string>
 }
 
 // ----------------------------------------------------------------------------
+// Milestone analytical report — a background report the coach sends once the
+// athlete has ~3 weeks of data (fires around day 21). The goal: surface
+// something NON-OBVIOUS the athlete likely doesn't know about themselves — a
+// pattern, correlation, or trend the coach noticed across the window. Narrative,
+// not a dashboard. (Timing is set in the milestone-reports cron route.)
+// ----------------------------------------------------------------------------
+
+const MILESTONE_SYSTEM_PROMPT = [
+  "You are the athlete's performance coach. They've hit their first 3 weeks. Write them a short, standalone report that makes them go 'whoa, I didn't realize that.'",
+  "",
+  "YOUR JOB — find the non-obvious:",
+  "- Analyze the WHOLE window of data below (check-ins, recovery/sleep/HRV, training, nutrition, logged workouts, how they felt). Look for a real pattern or relationship they probably can't see themselves.",
+  "- Examples of the kind of insight to hunt for (only if the data supports it): a lag effect (recovery dips the day AFTER a specific training type), a threshold (energy craters when sleep drops below a number), a mismatch (they rate motivation high but their hardest sessions land on low-recovery days), a streak or trend (HRV trending up over the three weeks), a nutrition link (low-protein days precede worse next-day sessions).",
+  "- Lead with the single most interesting, specific finding. Cite their actual numbers and dates/days to prove it — this must be clearly about THEM, not generic.",
+  "- Then give ONE concrete thing to do with that insight over the next few weeks.",
+  "- End with a brief, genuine note of encouragement about their consistency or progress.",
+  "",
+  "STYLE:",
+  "- 150-220 words. Warm, sharp, second person ('you'). Plain language — explain the pattern like a smart coach texting, not a statistics report. No bullet lists, no headers, no emojis.",
+  "- Be honest about confidence: if the data is thin or noisy, say the pattern is early and worth watching rather than overstating it. Never invent a pattern that isn't in the data.",
+  "",
+  "SAFETY — you are a PERFORMANCE COACH, not a healthcare provider: no medical advice, diagnoses, or supplement/medication guidance; if you see concerning health signals, keep it conservative and suggest a qualified professional.",
+  "",
+  "Write ONLY the message text — nothing else.",
+].join("\n");
+
+/**
+ * Generate the milestone analytical report for an athlete (fires ~day 21).
+ * ctx.recentCheckins should carry the full window (newest first) so the model
+ * can see trends.
+ */
+export async function generateMilestoneReport(ctx: CoachContext): Promise<string> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
+
+  const client = new Anthropic({ apiKey });
+
+  const contextText = buildContextText(
+    ctx,
+    "Everything above is this athlete's first ~3 weeks. Study the whole window, find the most interesting non-obvious pattern, and write their milestone report now.",
+  );
+
+  const msg = await client.messages.create({
+    model: process.env.COACH_MODEL || "claude-sonnet-4-6",
+    max_tokens: 700,
+    system: `${MILESTONE_SYSTEM_PROMPT}\n\n${contextText}`,
+    messages: [{ role: "user", content: "Send me my milestone report." }],
+  });
+
+  const text = msg.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("\n")
+    .trim();
+
+  if (!text) throw new Error("The coach didn't produce a Day-14 report.");
+  return text;
+}
+
+// ----------------------------------------------------------------------------
 // Memory distillation — turn a chat conversation into durable athlete notes.
 //
 // After a chat exchange, this reads the conversation (plus the notes we already
