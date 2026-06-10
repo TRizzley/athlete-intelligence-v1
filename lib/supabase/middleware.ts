@@ -42,8 +42,14 @@ export async function updateSession(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
 
+  // API routes authenticate themselves (session check inside the route, or a
+  // CRON_SECRET for the cron jobs). They must NOT be redirected to the HTML login
+  // page — a server-to-server caller (e.g. the Supabase-scheduled reminder cron)
+  // has no session cookie and needs to reach the route to present its secret.
+  const isApi = path.startsWith("/api");
+
   // Unauthenticated user hitting a protected route → send to login.
-  if (!user && !isPublicPath(path)) {
+  if (!user && !isApi && !isPublicPath(path)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("redirect", path);
