@@ -89,7 +89,9 @@ create table if not exists public.athlete_profiles (
   user_id               uuid not null unique references public.users(id) on delete cascade,
   full_name             text,
   phone                 text,  -- E.164 (e.g. +15551234567) for SMS check-in reminders
-  last_checkin_reminder_at timestamptz, -- idempotency for the daily SMS reminder
+  last_checkin_reminder_at timestamptz, -- (legacy) idempotency for the old daily reminder
+  morning_reminder_date text,    -- athlete-local date the 9am reminder was last evaluated
+  postworkout_reminder_date text, -- athlete-local date the 7pm reminder was last evaluated
   day14_report_sent_at  timestamptz, -- when the background Day-14 report was sent
   age                   int check (age between 10 and 100),
   sex                   text check (sex in ('male', 'female', 'other', 'prefer_not_to_say')),
@@ -189,7 +191,8 @@ create table if not exists public.coach_responses (
   created_by      uuid references public.users(id),
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
-  sent_at         timestamptz
+  sent_at         timestamptz,
+  feedback_reminder_at timestamptz  -- when the "give feedback" SMS nudge was evaluated
 );
 
 -- 2.6 predictions (structured, trackable predictions)

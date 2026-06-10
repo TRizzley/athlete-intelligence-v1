@@ -17,21 +17,29 @@ Project → Settings → Environment Variables. Add (Production):
 | `TWILIO_FROM_NUMBER` | your Twilio number in E.164, e.g. `+15551234567` |
 | `CRON_SECRET` | a long random string you make up (e.g. from a password generator) |
 | `NEXT_PUBLIC_APP_URL` | your live app URL, e.g. `https://your-app.vercel.app` |
+| `REMINDER_TIMEZONE` | (optional) IANA tz for the 9am/7pm timing; defaults to `America/New_York` |
 
 Then **redeploy** so the vars take effect.
 
 ## 3. The schedule
-`vercel.json` already registers the cron: it runs **once daily at 17:00 UTC** (noon ET / 9am PT) and texts every athlete who has a phone on file but hasn't checked in yet that day. Change the `schedule` in `vercel.json` if you want a different time (it's a standard cron expression).
+`vercel.json` registers a reminder "tick" (`/api/cron/reminders`) that runs **every 15 minutes**. On each tick it sends, when due:
+- **9am local** — morning check-in reminder, if no check-in logged today.
+- **7pm local** — post-workout reminder, if no post-workout logged today.
+- **~15 min after a coach response** — a nudge to give feedback, if none yet.
+
+"Local" uses `REMINDER_TIMEZONE` (one app timezone for the beta).
+
+> ⚠️ **Vercel plan:** a 15-minute cron requires **Vercel Pro**. On the Hobby plan, cron jobs only run **once per day**, so the 9am/7pm/feedback timing won't work. If you're on Hobby, tell Claude and we'll drive the tick from Supabase (pg_cron) instead — works on any plan.
 
 ## How it behaves
-- Only texts people **without** a check-in for the day, and **at most once per day** (tracked by `last_checkin_reminder_at`).
-- Message: "Hey [name], quick reminder to log today's check-in with your coach: [link] (reply STOP to opt out)."
+- Each reminder is sent **at most once per day per athlete** (tracked by `morning_reminder_date` / `postworkout_reminder_date`), and each feedback nudge **once per response** (`feedback_reminder_at`).
+- Only texts people who haven't done the relevant thing yet.
 - If the Twilio vars aren't set, the job safely no-ops — nothing breaks.
 - Twilio handles STOP/opt-out automatically on standard numbers.
 
 ## Test it
-After setting the vars + redeploying, you can trigger it manually:
+After setting the vars + redeploying, you can trigger a tick manually:
 ```bash
-curl -H "Authorization: Bearer YOUR_CRON_SECRET" https://your-app.vercel.app/api/cron/checkin-reminders
+curl -H "Authorization: Bearer YOUR_CRON_SECRET" https://your-app.vercel.app/api/cron/reminders
 ```
-It returns `{ ok: true, sent, skipped, errors }`.
+It returns `{ ok: true, localDate, hour, sent: { morning, postworkout, feedback }, errors }`. (It only sends morning/post-workout texts when the local hour is 9 or 19.)

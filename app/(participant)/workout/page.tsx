@@ -82,9 +82,10 @@ export default async function WorkoutPage() {
         ) : (
           <div className="space-y-2">
             {history.map((s) => (
-              <div
+              <Link
                 key={s.id}
-                className="card-tight flex items-center justify-between gap-3"
+                href={`/workout/sessions/${s.id}`}
+                className="card-tight flex items-center justify-between gap-3 transition hover:border-border-strong"
               >
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-foreground">
@@ -94,10 +95,19 @@ export default async function WorkoutPage() {
                     <div className="mt-0.5 line-clamp-1 text-xs text-muted">{s.notes}</div>
                   ) : null}
                 </div>
-                <span className="shrink-0 text-xs text-muted-2">
+                <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-2">
                   {formatDate(s.session_date)}
+                  <svg
+                    className="h-3.5 w-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
                 </span>
-              </div>
+              </Link>
             ))}
           </div>
         )}

@@ -36,7 +36,9 @@ export interface AthleteProfile {
   user_id: string;
   full_name: string | null;
   phone: string | null; // E.164, e.g. +15551234567 — for SMS check-in reminders
-  last_checkin_reminder_at: string | null; // idempotency for the daily reminder
+  last_checkin_reminder_at: string | null; // (legacy) idempotency for the old daily reminder
+  morning_reminder_date: string | null; // athlete-local date the 9am reminder was last evaluated
+  postworkout_reminder_date: string | null; // athlete-local date the 7pm reminder was last evaluated
   day14_report_sent_at: string | null; // when the Day-14 analytical report was sent
   age: number | null;
   sex: Sex | null;
@@ -209,6 +211,7 @@ export interface CoachResponse {
   created_at: string;
   updated_at: string;
   sent_at: string | null;
+  feedback_reminder_at: string | null; // when the "give feedback" nudge was evaluated
 }
 
 export interface Prediction {
