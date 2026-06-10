@@ -12,11 +12,13 @@ import { serverToday } from "@/lib/server-date";
 import { AutoCoachTrigger } from "@/components/auto-coach-trigger";
 import { PostWorkoutAckTrigger } from "@/components/post-workout-ack-trigger";
 import { AddPhonePrompt } from "@/components/add-phone-prompt";
+import { ReviewReadings } from "@/app/(participant)/upload/review-readings";
 import type {
   CoachResponse,
   DailyCheckin,
   PredictionWithOutcome,
   PredictionOutcome,
+  UploadedScreenshot,
 } from "@/lib/types";
 
 export const metadata = { title: "Today — The Coach" };
@@ -93,6 +95,43 @@ export default async function DashboardPage({
   // Prompt athletes who onboarded before phone capture to add their number.
   const needsPhone = !((profileRes.data as { phone: string | null } | null)?.phone);
 
+  // Pending OCR readings (uploaded anywhere) that still need the athlete's
+  // confirmation before they reach the coach. Surfaced here since Upload was
+  // removed from the nav.
+  const { data: shotData } = await supabase
+    .from("uploaded_screenshots")
+    .select("*")
+    .eq("user_id", user.id)
+    .is("applied_at", null)
+    .not("parsed_json", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(10);
+  const shotRows = (shotData as UploadedScreenshot[]) ?? [];
+  const urlMap = new Map<string, string>();
+  if (shotRows.length > 0) {
+    const { data: signed } = await supabase.storage
+      .from("screenshots")
+      .createSignedUrls(shotRows.map((r) => r.storage_path), 60 * 60);
+    signed?.forEach((s) => {
+      if (s.signedUrl && s.path) urlMap.set(s.path, s.signedUrl);
+    });
+  }
+  const pendingReadings = shotRows
+    .filter(
+      (r) =>
+        r.parsed_json != null &&
+        Object.values(r.parsed_json).some((v) => v !== null && v !== undefined),
+    )
+    .map((r) => ({
+      id: r.id,
+      source: r.source,
+      capture_date: r.capture_date,
+      created_at: r.created_at,
+      file_name: r.file_name,
+      url: urlMap.get(r.storage_path) ?? null,
+      parsed: r.parsed_json as Record<string, number | null>,
+    }));
+
   const name = firstName(recordRes.data?.full_name);
   const checkin = (checkinRes.data as DailyCheckin) ?? null;
   // Has today's training been logged via the post-workout check-in?
@@ -126,6 +165,8 @@ export default async function DashboardPage({
       </div>
 
       {needsPhone ? <AddPhonePrompt /> : null}
+
+      {pendingReadings.length > 0 ? <ReviewReadings readings={pendingReadings} /> : null}
 
       {saved === "checkin" ? (
         <div className="mb-5 rounded-lg border border-success/30 bg-success-soft px-3.5 py-2.5 text-sm text-success">

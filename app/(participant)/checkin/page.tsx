@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageShell } from "@/components/ui";
 import { serverToday } from "@/lib/server-date";
 import { CheckinForm } from "./checkin-form";
+import { UploadForm } from "@/app/(participant)/upload/upload-form";
 import type { DailyCheckin } from "@/lib/types";
 
 export const metadata = { title: "Daily check-in — The Coach" };
@@ -33,6 +34,17 @@ export default async function CheckinPage() {
       </div>
 
       <CheckinForm existing={(existing as DailyCheckin) ?? null} dateISO={date} />
+
+      <details className="mt-8 rounded-2xl border border-border bg-surface/40 p-4">
+        <summary className="cursor-pointer text-sm font-medium text-foreground">
+          Add a screenshot (optional)
+        </summary>
+        <p className="mb-3 mt-1 text-xs text-muted">
+          Snap your Whoop, Oura, Garmin, Apple, or nutrition screen — your coach
+          reads the numbers off it. You&apos;ll confirm what we read before it&apos;s used.
+        </p>
+        <UploadForm dateISO={date} />
+      </details>
     </PageShell>
   );
 }
