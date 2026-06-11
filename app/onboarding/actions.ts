@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { normalizePhone } from "@/lib/format";
 
 export type FormState = { error: string | null };
 
@@ -43,18 +42,9 @@ export async function saveProfile(
 
   const devices = formData.getAll("devices").map(String).filter(Boolean);
 
-  // Phone is optional at onboarding, but if they typed something, it must look
-  // like a real number (we'll text check-in reminders to it).
-  const phoneRaw = str(formData, "phone");
-  const phone = normalizePhone(phoneRaw);
-  if (phoneRaw && !phone) {
-    return { error: "That mobile number doesn't look right — e.g. (555) 123-4567." };
-  }
-
   const payload = {
     user_id: user.id,
     full_name: fullName,
-    phone,
     age: numOrNull(formData, "age"),
     sex: str(formData, "sex"),
     height_in: numOrNull(formData, "height_in"),
@@ -89,32 +79,4 @@ export async function saveProfile(
   revalidatePath("/dashboard");
   revalidatePath("/onboarding");
   redirect("/dashboard");
-}
-
-// Save just the mobile number — used by the "Add your mobile number" prompt shown
-// to athletes who onboarded before phone capture existed. On success the prompt
-// clears itself (the dashboard stops rendering it once a number is on file).
-export async function savePhone(
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Your session expired. Please sign in again." };
-
-  const phone = normalizePhone(str(formData, "phone"));
-  if (!phone) {
-    return { error: "Enter a valid mobile number, e.g. (555) 123-4567." };
-  }
-
-  const { error } = await supabase
-    .from("athlete_profiles")
-    .update({ phone })
-    .eq("user_id", user.id);
-  if (error) return { error: error.message };
-
-  revalidatePath("/dashboard");
-  return { error: null };
 }

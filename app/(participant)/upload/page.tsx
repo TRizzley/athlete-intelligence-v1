@@ -110,16 +110,12 @@ export default async function UploadPage() {
           />
         ) : (
           (() => {
-            // Group by the day the data is for so uploads don't pile up across
-            // days: the most recent day shows by default, older days collapse.
+            // Group by the day the data is for. Today's uploads show by
+            // default; anything older collapses under "Earlier uploads".
             const dayOf = (r: UploadedScreenshot) =>
               (r.capture_date ?? r.created_at).slice(0, 10);
-            const latestDay = rows
-              .map(dayOf)
-              .sort()
-              .at(-1);
-            const todays = rows.filter((r) => dayOf(r) === latestDay);
-            const earlier = rows.filter((r) => dayOf(r) !== latestDay);
+            const todays = rows.filter((r) => dayOf(r) === today);
+            const earlier = rows.filter((r) => dayOf(r) !== today);
 
             const Grid = ({ items }: { items: UploadedScreenshot[] }) => (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -187,9 +183,13 @@ export default async function UploadPage() {
             return (
               <>
                 <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-2">
-                  {latestDay ? formatDate(latestDay) : "Latest"} ({todays.length})
+                  Today — {formatDate(today)} ({todays.length})
                 </h2>
-                <Grid items={todays} />
+                {todays.length === 0 ? (
+                  <p className="text-sm text-muted-2">No uploads yet today.</p>
+                ) : (
+                  <Grid items={todays} />
+                )}
 
                 {earlier.length > 0 ? (
                   <details className="mt-6">

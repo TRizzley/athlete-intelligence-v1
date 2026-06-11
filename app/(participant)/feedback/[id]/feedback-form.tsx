@@ -27,6 +27,12 @@ export function FeedbackForm({
     <form action={action} className="space-y-5">
       <input type="hidden" name="coach_response_id" value={responseId} />
 
+      {/* Prediction rating first — the prediction text is displayed above the form
+          so it's fresh in mind when the athlete hits this question. */}
+      <Question label="Did the prediction come true?" hint="Compare against the prediction shown above.">
+        <RadioCards name="prediction_came_true" options={PREDICTION_FEEDBACK_OPTIONS} defaultValue={f?.prediction_came_true ?? null} columns={4} />
+      </Question>
+
       <Question label="Did this feel accurate?" hint="Did it match what your body was actually telling you?">
         <RadioCards name="felt_accurate" options={YSN_OPTIONS} defaultValue={f?.felt_accurate ?? null} columns={3} />
       </Question>
@@ -37,10 +43,6 @@ export function FeedbackForm({
 
       <Question label="Was the recommendation useful?" hint="Did it actually help you decide how to train?">
         <RadioCards name="was_useful" options={YSN_OPTIONS} defaultValue={f?.was_useful ?? null} columns={3} />
-      </Question>
-
-      <Question label="Did the prediction come true?" hint="Think about the prediction for the next day.">
-        <RadioCards name="prediction_came_true" options={PREDICTION_FEEDBACK_OPTIONS} defaultValue={f?.prediction_came_true ?? null} columns={4} />
       </Question>
 
       <Question label="Would you pay for this if it kept improving over time?">

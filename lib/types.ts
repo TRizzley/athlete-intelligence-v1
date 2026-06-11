@@ -35,11 +35,12 @@ export interface AthleteProfile {
   id: string;
   user_id: string;
   full_name: string | null;
-  phone: string | null; // E.164, e.g. +15551234567 — for SMS check-in reminders
   last_checkin_reminder_at: string | null; // (legacy) idempotency for the old daily reminder
   morning_reminder_date: string | null; // athlete-local date the 9am reminder was last evaluated
   postworkout_reminder_date: string | null; // athlete-local date the 7pm reminder was last evaluated
-  day14_report_sent_at: string | null; // when the Day-14 analytical report was sent
+  day7_report_sent_at: string | null;  // when the Day-7 first-week report was sent
+  day14_report_sent_at: string | null; // when the Day-21 Phase-1 report was sent (legacy column name)
+  day42_report_sent_at: string | null; // when the Day-42 Phase-2 report was sent
   age: number | null;
   sex: Sex | null;
   height_in: number | null;

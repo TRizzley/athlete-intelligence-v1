@@ -96,16 +96,16 @@ export function CheckinForm({
         </p>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
           <Field label="Calories" htmlFor="calories">
-            <input id="calories" name="calories" type="number" min="0" defaultValue={c?.calories ?? ""} className="input" />
+            <input id="calories" name="calories" type="number" inputMode="decimal" step="any" min="0" defaultValue={c?.calories ?? ""} className="input" />
           </Field>
           <Field label="Protein (g)" htmlFor="protein_g">
-            <input id="protein_g" name="protein_g" type="number" min="0" defaultValue={c?.protein_g ?? ""} className="input" />
+            <input id="protein_g" name="protein_g" type="number" inputMode="decimal" step="any" min="0" defaultValue={c?.protein_g ?? ""} className="input" />
           </Field>
           <Field label="Carbs (g)" htmlFor="carbs_g">
-            <input id="carbs_g" name="carbs_g" type="number" min="0" defaultValue={c?.carbs_g ?? ""} className="input" />
+            <input id="carbs_g" name="carbs_g" type="number" inputMode="decimal" step="any" min="0" defaultValue={c?.carbs_g ?? ""} className="input" />
           </Field>
           <Field label="Fat (g)" htmlFor="fat_g">
-            <input id="fat_g" name="fat_g" type="number" min="0" defaultValue={c?.fat_g ?? ""} className="input" />
+            <input id="fat_g" name="fat_g" type="number" inputMode="decimal" step="any" min="0" defaultValue={c?.fat_g ?? ""} className="input" />
           </Field>
           <Field label="Water (oz)" htmlFor="water_oz">
             <input id="water_oz" name="water_oz" type="number" inputMode="decimal" step="any" min="0" defaultValue={c?.water_oz ?? ""} className="input" />
@@ -119,12 +119,12 @@ export function CheckinForm({
           How you feel
         </h3>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Slider name="energy" label="Energy" low="Exhausted" high="Energized" defaultValue={c?.energy ?? 5} />
-          <Slider name="mood" label="Mood" low="Terrible" high="Excellent" defaultValue={c?.mood ?? 5} />
-          <Slider name="soreness" label="Muscle soreness" low="None" high="Severe" defaultValue={c?.soreness ?? 3} />
-          <Slider name="stress" label="Stress" low="Calm" high="Very stressed" defaultValue={c?.stress ?? 4} />
-          <Slider name="motivation" label="Motivation to train" low="None" high="High" defaultValue={c?.motivation ?? 6} />
-          <Slider name="sleep_quality" label="Sleep quality (felt)" low="Terrible" high="Great" defaultValue={c?.sleep_quality ?? 6} />
+          <Slider name="energy" label="Energy" low="Exhausted" high="Energized" defaultValue={c?.energy ?? null} />
+          <Slider name="mood" label="Mood" low="Terrible" high="Excellent" defaultValue={c?.mood ?? null} />
+          <Slider name="soreness" label="Muscle soreness" low="None" high="Severe" defaultValue={c?.soreness ?? null} />
+          <Slider name="stress" label="Stress" low="Calm" high="Very stressed" defaultValue={c?.stress ?? null} />
+          <Slider name="motivation" label="Motivation to train" low="None" high="High" defaultValue={c?.motivation ?? null} />
+          <Slider name="sleep_quality" label="Sleep quality (felt)" low="Terrible" high="Great" defaultValue={c?.sleep_quality ?? null} />
         </div>
       </section>
 

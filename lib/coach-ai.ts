@@ -51,6 +51,15 @@ export interface WorkoutLogBrief {
   }[];
 }
 
+// Where the athlete is in their program. Gives the AI temporal context it
+// otherwise lacks — a Day 5 recommendation is very different from Day 47.
+export interface ProgramContext {
+  dayNumber: number;     // calendar days since first check-in (1-indexed)
+  programWeek: number;   // ceil(dayNumber / 7)
+  totalCheckins: number; // how many check-ins have been logged so far
+  firstCheckinDate: string; // YYYY-MM-DD of their very first check-in
+}
+
 // Everything we feed the model. Mirrors what the admin review page already loads.
 export interface CoachContext {
   athleteName: string | null;
@@ -65,6 +74,7 @@ export interface CoachContext {
   feedback: UserFeedback[];
   recentWorkouts?: WorkoutLogBrief[]; // logged sessions w/ per-set weight+reps
   recentMessages?: ChatTurn[]; // recent coach<->athlete chat (oldest first)
+  programContext?: ProgramContext; // where they are in the program (optional — absent for brand-new athletes)
 }
 
 // ----------------------------------------------------------------------------
@@ -217,15 +227,29 @@ function firstOutcome(p: PredictionWithOutcome): PredictionOutcome | null {
 // Turn recent feedback into explicit, prioritized calibration directives so the
 // next decision actually adapts to what the athlete said fell short — instead of
 // the model just seeing a flat dump of ratings.
+//
+// Sample guard: we need at least 3 feedback entries before firing directives.
+// Below that threshold, a single "somewhat" would otherwise trigger a full
+// override, which over-corrects on noise and makes the coach unstable early on.
+//
+// Weighting: "no" counts 2× vs "somewhat" so a clear miss is treated more
+// urgently than a mild dissatisfaction.
 function feedbackCalibration(feedback: UserFeedback[]): string | null {
   const recent = feedback.slice(0, 6); // newest first
-  if (recent.length === 0) return null;
+  // Require a minimum sample before we trust the signal enough to act on it.
+  if (recent.length < 3) return null;
 
-  const count = (key: keyof UserFeedback, v: string) =>
-    recent.filter((f) => f[key] === v).length;
-  const half = Math.ceil(recent.length / 2);
-  const weak = (key: keyof UserFeedback) =>
-    count(key, "no") > 0 || count(key, "no") + count(key, "somewhat") >= half;
+  // Weighted score: "no" = 2 points, "somewhat" = 1 point.
+  const weightedScore = (key: keyof UserFeedback) =>
+    recent.reduce((sum, f) => {
+      if (f[key] === "no") return sum + 2;
+      if (f[key] === "somewhat") return sum + 1;
+      return sum;
+    }, 0);
+  // Threshold: fire a directive when weighted score >= half the max possible
+  // (i.e., average "somewhat" or worse across the window).
+  const threshold = recent.length; // max is 2×n (all "no"), threshold at n
+  const weak = (key: keyof UserFeedback) => weightedScore(key) >= threshold;
 
   const directives: string[] = [];
 
@@ -265,11 +289,26 @@ function feedbackCalibration(feedback: UserFeedback[]): string | null {
 function buildContextText(ctx: CoachContext, closing?: string): string {
   const parts: string[] = [];
 
-  parts.push(
-    `Today is ${ctx.today} — the day you are planning for ${ctx.athleteName ?? "this athlete"}. ` +
-      `Everything below is RESULTS from days that have already happened; the most recent check-in is the latest completed day (usually yesterday/last night). ` +
-      `Read those results, then tell the athlete exactly how to train, fuel, and recover TODAY.`,
-  );
+  // Program context header — where the athlete is in their journey.
+  if (ctx.programContext) {
+    const pc = ctx.programContext;
+    const weekLabel = `Week ${pc.programWeek}`;
+    const dayLabel = `Day ${pc.dayNumber}`;
+    parts.push(
+      `Today is ${ctx.today} — the day you are planning for ${ctx.athleteName ?? "this athlete"}. ` +
+        `PROGRAM POSITION: ${dayLabel} (${weekLabel}) — ${pc.totalCheckins} check-in${pc.totalCheckins === 1 ? "" : "s"} logged since ${pc.firstCheckinDate}. ` +
+        `Let the stage of the program inform your coaching: early weeks (1–3) should emphasize habit-building and baseline-setting, not max intensity; ` +
+        `mid-program (weeks 4–8) is where you push progression; later blocks should account for accumulated fatigue and adaptation. ` +
+        `Everything below is RESULTS from days that have already happened; the most recent check-in is the latest completed day (usually yesterday/last night). ` +
+        `Read those results, then tell the athlete exactly how to train, fuel, and recover TODAY.`,
+    );
+  } else {
+    parts.push(
+      `Today is ${ctx.today} — the day you are planning for ${ctx.athleteName ?? "this athlete"}. ` +
+        `Everything below is RESULTS from days that have already happened; the most recent check-in is the latest completed day (usually yesterday/last night). ` +
+        `Read those results, then tell the athlete exactly how to train, fuel, and recover TODAY.`,
+    );
+  }
 
   // Profile
   if (ctx.profile) {
@@ -674,52 +713,113 @@ export async function generatePostWorkoutAck(ctx: CoachContext): Promise<string>
 }
 
 // ----------------------------------------------------------------------------
-// Milestone analytical report — a background report the coach sends once the
-// athlete has ~3 weeks of data (fires around day 21). The goal: surface
-// something NON-OBVIOUS the athlete likely doesn't know about themselves — a
-// pattern, correlation, or trend the coach noticed across the window. Narrative,
-// not a dashboard. (Timing is set in the milestone-reports cron route.)
+// Milestone analytical reports — three-tier system.
+//
+// Day 7  ("First Week"): Brief pattern note, 3-4 sentences. Signals are thin
+//         but a quick observation validates the habit early and builds trust.
+//
+// Day 21 ("Phase 1"):   The original deep report. Full pattern analysis across
+//         the first training block. The "whoa, I didn't realize that" moment.
+//
+// Day 42 ("Phase 2"):   Longitudinal analysis comparing Phase 1 vs Phase 2.
+//         Has the intervention worked? What's trending? What needs adjusting?
+//         More sophisticated — the coach can reference the Day-21 report.
+//
+// All three land in the coach chat. Timing is controlled in the cron route.
 // ----------------------------------------------------------------------------
 
-const MILESTONE_SYSTEM_PROMPT = [
-  "You are the athlete's performance coach. They've hit their first 3 weeks. Write them a short, standalone report that makes them go 'whoa, I didn't realize that.'",
-  "",
-  "YOUR JOB — find the non-obvious:",
-  "- Analyze the WHOLE window of data below (check-ins, recovery/sleep/HRV, training, nutrition, logged workouts, how they felt). Look for a real pattern or relationship they probably can't see themselves.",
-  "- Examples of the kind of insight to hunt for (only if the data supports it): a lag effect (recovery dips the day AFTER a specific training type), a threshold (energy craters when sleep drops below a number), a mismatch (they rate motivation high but their hardest sessions land on low-recovery days), a streak or trend (HRV trending up over the three weeks), a nutrition link (low-protein days precede worse next-day sessions).",
-  "- Lead with the single most interesting, specific finding. Cite their actual numbers and dates/days to prove it — this must be clearly about THEM, not generic.",
-  "- Then give ONE concrete thing to do with that insight over the next few weeks.",
-  "- End with a brief, genuine note of encouragement about their consistency or progress.",
-  "",
-  "STYLE:",
-  "- 150-220 words. Warm, sharp, second person ('you'). Plain language — explain the pattern like a smart coach texting, not a statistics report. No bullet lists, no headers, no emojis.",
-  "- Be honest about confidence: if the data is thin or noisy, say the pattern is early and worth watching rather than overstating it. Never invent a pattern that isn't in the data.",
-  "",
-  "SAFETY — you are a PERFORMANCE COACH, not a healthcare provider: no medical advice, diagnoses, or supplement/medication guidance; if you see concerning health signals, keep it conservative and suggest a qualified professional.",
-  "",
-  "Write ONLY the message text — nothing else.",
-].join("\n");
+export type MilestoneTier = 7 | 21 | 42;
+
+const MILESTONE_SYSTEM_PROMPTS: Record<MilestoneTier, string> = {
+  7: [
+    "You are the athlete's performance coach. They've just completed their first week of tracking. Send them ONE brief observation — a first-week pattern note that lands in chat.",
+    "",
+    "YOUR JOB — find ONE early signal worth naming:",
+    "- Look at the 7 days of data. What's the clearest, most specific thing you can already see? It might be a consistency strength, an early trend (e.g. recovery climbing or sliding), a pattern in how they respond to training, or a data gap worth flagging.",
+    "- Be honest about confidence: one week is thin. Frame it as 'here's what I'm already noticing' not 'here's the definitive pattern'. Early observations carry low-moderate confidence.",
+    "- Name one specific thing they can do in week 2 based on this observation.",
+    "- End with a short, genuine note that acknowledges the work of building the habit.",
+    "",
+    "STYLE:",
+    "- 3-4 sentences, 60-90 words. Warm, direct, second person. No bullet lists, no headers, no emojis. Conversational — like a coach texting at the end of week one.",
+    "- Never invent a pattern. If the data is too thin to say anything specific, acknowledge that briefly and ask one question that would sharpen week 2.",
+    "",
+    "SAFETY — you are a PERFORMANCE COACH, not a healthcare provider: no medical advice, diagnoses, or supplement/medication guidance.",
+    "",
+    "Write ONLY the message text — nothing else.",
+  ].join("\n"),
+
+  21: [
+    "You are the athlete's performance coach. They've completed their first three weeks. Write them a short, standalone report that makes them go 'whoa, I didn't realize that.'",
+    "",
+    "YOUR JOB — find the non-obvious:",
+    "- Analyze the WHOLE window (check-ins, recovery/sleep/HRV, training, nutrition, logged workouts, subjective feel). Look for a real pattern or relationship they probably can't see themselves.",
+    "- Examples of insights to hunt for (only if data supports it): a lag effect (recovery dips the day AFTER a specific training type), a threshold (energy craters when sleep drops below X), a mismatch (high motivation but hardest sessions fall on low-recovery days), a trend (HRV climbing over three weeks), a nutrition link (low-protein days precede worse next-day sessions).",
+    "- Lead with the single most interesting, specific finding. Cite their actual numbers and dates/days to prove it — this must be clearly about THEM.",
+    "- Give ONE concrete thing to do with that insight over the next few weeks.",
+    "- End with a brief, genuine note of encouragement about their consistency or progress.",
+    "",
+    "STYLE:",
+    "- 150-220 words. Warm, sharp, second person. Plain language — like a smart coach texting, not a statistics report. No bullet lists, no headers, no emojis.",
+    "- Be honest about confidence: if data is thin or noisy, say the pattern is early and worth watching rather than overstating it. Never invent a pattern.",
+    "",
+    "SAFETY — you are a PERFORMANCE COACH, not a healthcare provider: no medical advice, diagnoses, or supplement/medication guidance.",
+    "",
+    "Write ONLY the message text — nothing else.",
+  ].join("\n"),
+
+  42: [
+    "You are the athlete's performance coach. They've just passed the six-week mark — two full training blocks. Write a Phase 2 analysis report.",
+    "",
+    "YOUR JOB — longitudinal comparison and adaptation check:",
+    "- Compare Phase 1 (first 3 weeks) vs Phase 2 (weeks 4-6). What has actually changed? What's trending in the right direction? What's stalled or regressed?",
+    "- Look for adaptation signatures: is performance going up (weights, recovery scores, HRV trend)? Is fatigue accumulating faster than they can recover? Are their subjective scores drifting from objective wearable data?",
+    "- The standard at 6 weeks is higher than at 3: you have enough data to identify genuine trends, not just early patterns. Lead with the most important insight — the thing that should directly change how they train or recover in weeks 7+.",
+    "- Name ONE specific adjustment for the next training block based on the full 6-week picture.",
+    "- Close with a genuine observation about what they've built — consistency, progression, behavioral change — that's earned, not generic.",
+    "",
+    "STYLE:",
+    "- 200-270 words. Precise, warm, second person. No bullet lists, no headers, no emojis. Reference specific numbers and dates.",
+    "- Be honest about what the data does and doesn't show. Never invent a trend.",
+    "",
+    "SAFETY — you are a PERFORMANCE COACH, not a healthcare provider: no medical advice, diagnoses, or supplement/medication guidance.",
+    "",
+    "Write ONLY the message text — nothing else.",
+  ].join("\n"),
+};
+
+const MILESTONE_CLOSING: Record<MilestoneTier, string> = {
+  7: "That's the first 7 days. Identify the clearest early signal and write the first-week note now.",
+  21: "Everything above is this athlete's first ~3 weeks. Study the whole window, find the most interesting non-obvious pattern, and write their Phase 1 report now.",
+  42: "Everything above covers this athlete's full 6 weeks across two training blocks. Compare the two phases, identify the most important trend, and write their Phase 2 analysis now.",
+};
 
 /**
- * Generate the milestone analytical report for an athlete (fires ~day 21).
- * ctx.recentCheckins should carry the full window (newest first) so the model
- * can see trends.
+ * Generate a milestone analytical report for an athlete.
+ *
+ * tier  = 7  → brief first-week note (fires ~day 7, min 5 check-ins)
+ * tier  = 21 → phase-1 deep report   (fires ~day 21, min 12 check-ins)
+ * tier  = 42 → phase-2 longitudinal  (fires ~day 42, min 25 check-ins)
+ *
+ * ctx.recentCheckins should carry the full available window (newest first).
  */
-export async function generateMilestoneReport(ctx: CoachContext): Promise<string> {
+export async function generateMilestoneReport(
+  ctx: CoachContext,
+  tier: MilestoneTier = 21,
+): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
 
   const client = new Anthropic({ apiKey });
 
-  const contextText = buildContextText(
-    ctx,
-    "Everything above is this athlete's first ~3 weeks. Study the whole window, find the most interesting non-obvious pattern, and write their milestone report now.",
-  );
+  const contextText = buildContextText(ctx, MILESTONE_CLOSING[tier]);
+  const systemPrompt = MILESTONE_SYSTEM_PROMPTS[tier];
+  const maxTok = tier === 7 ? 300 : tier === 21 ? 700 : 900;
 
   const msg = await client.messages.create({
     model: process.env.COACH_MODEL || "claude-sonnet-4-6",
-    max_tokens: 700,
-    system: `${MILESTONE_SYSTEM_PROMPT}\n\n${contextText}`,
+    max_tokens: maxTok,
+    system: `${systemPrompt}\n\n${contextText}`,
     messages: [{ role: "user", content: "Send me my milestone report." }],
   });
 
@@ -729,7 +829,7 @@ export async function generateMilestoneReport(ctx: CoachContext): Promise<string
     .join("\n")
     .trim();
 
-  if (!text) throw new Error("The coach didn't produce a Day-14 report.");
+  if (!text) throw new Error(`Milestone tier-${tier} report returned empty.`);
   return text;
 }
 
@@ -855,7 +955,281 @@ export async function distillMemoryFromChat(
     const note = asString(o.note);
     if (!note) continue;
     const key = note.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const category = asString(o.category) || null;
+    out.push({ category, note });
+  }
+  return out;
+}
+
+// ----------------------------------------------------------------------------
+// Check-in memory distillation — harvest durable facts from daily check-ins.
+// ----------------------------------------------------------------------------
+
+const CHECKIN_DISTILL_SYSTEM_PROMPT = [
+  "You maintain a performance coach's private long-term memory about ONE athlete.",
+  "You are given the notes already on file and the free-text fields from a single daily check-in (open_comments and/or pain_injury_note).",
+  "Extract ONLY new, durable facts worth remembering for future coaching — things that will still be true or relevant next week:",
+  "- injuries and recurring pain patterns (e.g. 'right shoulder clicking during pressing', 'knee flares up on high-volume squat days')",
+  "- schedule or life constraints (e.g. 'starting a new demanding job', 'exam week in June', 'traveling for work')",
+  "- coaching context they shared (e.g. 'their sport coach said to limit overhead pressing', 'doctor cleared them for full training')",
+  "- stable behavioral patterns (e.g. 'tends to underreport fatigue', 'skips post-workout nutrition when busy')",
+  "Do NOT record: today's soreness, how they feel today, one-off moods, routine check-in context.",
+  "Do NOT duplicate or lightly reword a note already on file.",
+  "Keep each note one crisp sentence, written about the athlete in third person.",
+  "If there is nothing new worth saving, return an empty list. Be very conservative — quality over quantity.",
+  "Return ONLY by calling save_memory_notes.",
+].join("\n");
+
+export async function distillMemoryFromCheckin(
+  existingNotes: { category: string | null; note: string }[],
+  checkin: { open_comments?: string | null; pain_injury_note?: string | null },
+): Promise<DistilledNote[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  const open = checkin.open_comments?.trim() ?? "";
+  const pain = checkin.pain_injury_note?.trim() ?? "";
+  if (!apiKey || (!open && !pain)) return [];
+
+  const client = new Anthropic({ apiKey });
+
+  const existingText =
+    existingNotes.length > 0
+      ? existingNotes
+          .map((n) => `- ${n.category ? `[${n.category}] ` : ""}${n.note}`)
+          .join("\n")
+      : "(none yet)";
+
+  const checkinText = [
+    pain ? `pain_injury_note: "${pain}"` : null,
+    open ? `open_comments: "${open}"` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const userContent =
+    "NOTES ALREADY ON FILE:\n" +
+    existingText +
+    "\n\nCHECK-IN FREE-TEXT FIELDS:\n" +
+    checkinText +
+    "\n\nExtract any new durable memory notes by calling save_memory_notes.";
+
+  let input: unknown;
+  try {
+    const msg = await client.messages.create({
+      model: process.env.MEMORY_MODEL || "claude-haiku-4-5-20251001",
+      max_tokens: 400,
+      system: CHECKIN_DISTILL_SYSTEM_PROMPT,
+      tools: [DISTILL_TOOL],
+      tool_choice: { type: "tool", name: "save_memory_notes" },
+      messages: [{ role: "user", content: userContent }],
+    });
+    const toolUse = msg.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+    );
+    input = toolUse?.input;
+  } catch {
+    return [];
+  }
+
+  const raw = (input as { notes?: unknown })?.notes;
+  if (!Array.isArray(raw)) return [];
+
+  const seen = new Set(existingNotes.map((n) => n.note.trim().toLowerCase()));
+  const out: DistilledNote[] = [];
+  for (const item of raw) {
+    const o = (item ?? {}) as Record<string, unknown>;
+    const note = asString(o.note);
+    if (!note) continue;
+    const key = note.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const category = asString(o.category) || null;
+    out.push({ category, note });
+  }
+  return out;
+}
+"save_memory_notes" },
+      messages: [{ role: "user", content: userContent }],
+    });
+    const toolUse = msg.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+    );
+    input = toolUse?.input;
+  } catch {
+    return []; // never block check-in on memory distillation
+  }
+
+  const raw = (input as { notes?: unknown })?.notes;
+  if (!Array.isArray(raw)) return [];
+
+  const seen = new Set(existingNotes.map((n) => n.note.trim().toLowerCase()));
+  const out: DistilledNote[] = [];
+  for (const item of raw) {
+    const o = (item ?? {}) as Record<string, unknown>;
+    const note = asString(o.note);
+    if (!note) continue;
+    const key = note.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const category = asString(o.category) || null;
+    out.push({ category, note });
+  }
+  return out;
+} [];
+
+  const client = new Anthropic({ apiKey });
+
+  const existingText =
+    existingNotes.length > 0
+      ? existingNotes
+          .map((n) => `- ${n.category ? `[${n.category}] ` : ""}${n.note}`)
+          .join("\n")
+      : "(none yet)";
+  const convoText = history
+    .map((t) => `${t.role === "athlete" ? "Athlete" : "Coach"}: ${t.body}`)
+    .join("\n");
+
+  const userContent =
+    "NOTES ALREADY ON FILE:\n" +
+    existingText +
+    "\n\nRECENT CONVERSATION:\n" +
+    convoText +
+    "\n\nExtract any new durable notes by calling save_memory_notes.";
+
+  let input: unknown;
+  try {
+    const msg = await client.messages.create({
+      model: process.env.MEMORY_MODEL || "claude-haiku-4-5-20251001",
+      max_tokens: 600,
+      system: DISTILL_SYSTEM_PROMPT,
+      tools: [DISTILL_TOOL],
+      tool_choice: { type: "tool", name: "save_memory_notes" },
+      messages: [{ role: "user", content: userContent }],
+    });
+    const toolUse = msg.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+    );
+    input = toolUse?.input;
+  } catch {
+    return []; // never block chat on memory distillation
+  }
+
+  const raw = (input as { notes?: unknown })?.notes;
+  if (!Array.isArray(raw)) return [];
+
+  const seen = new Set(
+    existingNotes.map((n) => n.note.trim().toLowerCase()),
+  );
+  const out: DistilledNote[] = [];
+  for (const item of raw) {
+    const o = (item ?? {}) as Record<string, unknown>;
+    const note = asString(o.note);
+    if (!note) continue;
+    const key = note.toLowerCase();
     if (seen.has(key)) continue; // de-dupe against existing + within this batch
+    seen.add(key);
+    const category = asString(o.category) || null;
+    out.push({ category, note });
+  }
+  return out;
+}
+
+// ----------------------------------------------------------------------------
+// Check-in memory distillation — harvest durable facts from daily check-ins.
+//
+// Athletes often drop gold in open_comments and pain_injury_note that never
+// makes it into the coaching memory: "starting a new job next week," "right
+// shoulder clicking again," "coach said to back off squats." This function
+// runs a lightweight pass on those two free-text fields after each check-in
+// and extracts only durable, non-transient facts.
+//
+// Conservative by design: transient daily state is explicitly excluded
+// because it already lives in the check-in record. We only want things that
+// will still be true (or relevant) next week. Uses Haiku for speed and cost.
+// Never throws — callers treat failure as "no new notes" so check-in flow
+// is never blocked on this.
+// ----------------------------------------------------------------------------
+
+const CHECKIN_DISTILL_SYSTEM_PROMPT = [
+  "You maintain a performance coach's private long-term memory about ONE athlete.",
+  "You are given the notes already on file and the free-text fields from a single daily check-in (open_comments and/or pain_injury_note).",
+  "Extract ONLY new, durable facts worth remembering for future coaching — things that will still be true or relevant next week:",
+  "- injuries and recurring pain patterns (e.g. 'right shoulder clicking during pressing', 'knee flares up on high-volume squat days')",
+  "- schedule or life constraints (e.g. 'starting a new demanding job', 'exam week in June', 'traveling for work')",
+  "- coaching context they shared (e.g. 'their sport coach said to limit overhead pressing', 'doctor cleared them for full training')",
+  "- stable behavioral patterns (e.g. 'tends to underreport fatigue', 'skips post-workout nutrition when busy')",
+  "Do NOT record: today's soreness, how they feel today, one-off moods, routine check-in context.",
+  "Do NOT duplicate or lightly reword a note already on file.",
+  "Keep each note one crisp sentence, written about the athlete in third person.",
+  "If there is nothing new worth saving, return an empty list. Be very conservative — quality over quantity.",
+  "Return ONLY by calling save_memory_notes.",
+].join("\n");
+
+export async function distillMemoryFromCheckin(
+  existingNotes: { category: string | null; note: string }[],
+  checkin: { open_comments?: string | null; pain_injury_note?: string | null },
+): Promise<DistilledNote[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  // Nothing to scan — bail fast without an API call.
+  const open = checkin.open_comments?.trim() ?? "";
+  const pain = checkin.pain_injury_note?.trim() ?? "";
+  if (!apiKey || (!open && !pain)) return [];
+
+  const client = new Anthropic({ apiKey });
+
+  const existingText =
+    existingNotes.length > 0
+      ? existingNotes
+          .map((n) => `- ${n.category ? `[${n.category}] ` : ""}${n.note}`)
+          .join("\n")
+      : "(none yet)";
+
+  const checkinText = [
+    pain ? `pain_injury_note: "${pain}"` : null,
+    open ? `open_comments: "${open}"` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const userContent =
+    "NOTES ALREADY ON FILE:\n" +
+    existingText +
+    "\n\nCHECK-IN FREE-TEXT FIELDS:\n" +
+    checkinText +
+    "\n\nExtract any new durable memory notes by calling save_memory_notes.";
+
+  let input: unknown;
+  try {
+    const msg = await client.messages.create({
+      model: process.env.MEMORY_MODEL || "claude-haiku-4-5-20251001",
+      max_tokens: 400,
+      system: CHECKIN_DISTILL_SYSTEM_PROMPT,
+      tools: [DISTILL_TOOL],
+      tool_choice: { type: "tool", name: "save_memory_notes" },
+      messages: [{ role: "user", content: userContent }],
+    });
+    const toolUse = msg.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+    );
+    input = toolUse?.input;
+  } catch {
+    return []; // never block check-in on memory distillation
+  }
+
+  const raw = (input as { notes?: unknown })?.notes;
+  if (!Array.isArray(raw)) return [];
+
+  const seen = new Set(existingNotes.map((n) => n.note.trim().toLowerCase()));
+  const out: DistilledNote[] = [];
+  for (const item of raw) {
+    const o = (item ?? {}) as Record<string, unknown>;
+    const note = asString(o.note);
+    if (!note) continue;
+    const key = note.toLowerCase();
+    if (seen.has(key)) continue;
     seen.add(key);
     const category = asString(o.category) || null;
     out.push({ category, note });

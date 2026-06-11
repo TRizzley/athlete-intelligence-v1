@@ -37,6 +37,23 @@ export async function sendMessage(
   if (!body) return { error: "Type a message first." };
   if (body.length > 4000) return { error: "That message is a bit long — try trimming it." };
 
+  // Rate limit: one Claude call per user per 10 seconds. Check for any message
+  // (either role) from this user in the last 10 seconds before doing anything
+  // else. This stops rapid-fire submissions from running up API costs without
+  // needing external infrastructure. Not perfectly atomic, but covers the
+  // practical case of repeated clicks or fast re-sends.
+  const cooldownSince = new Date(Date.now() - 10_000).toISOString();
+  const { data: recent } = await supabase
+    .from("coach_messages")
+    .select("id")
+    .eq("user_id", user.id)
+    .gte("created_at", cooldownSince)
+    .limit(1)
+    .maybeSingle();
+  if (recent) {
+    return { error: "Give the coach a moment — try again in a few seconds." };
+  }
+
   // The browser sends its LOCAL today so the coach's sense of "today" matches the
   // athlete's real day — this server action runs in UTC and would otherwise be off
   // by a day in the evening. Fall back to the server date if it's missing/invalid.

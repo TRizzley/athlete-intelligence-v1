@@ -45,13 +45,16 @@ function Spinner() {
 
 // ---------------------------------------------------------------------------
 // 1–10 subjective slider with a live value readout and low/high anchors.
+// Supports defaultValue=null — the slider starts in an "unset" state and the
+// form field is omitted entirely until the athlete taps to activate it. This
+// prevents phantom data from hardcoded defaults polluting the coach's signal.
 // ---------------------------------------------------------------------------
 export function Slider({
   name,
   label,
   low,
   high,
-  defaultValue = 5,
+  defaultValue = null,
   min = 1,
   max = 10,
 }: {
@@ -59,34 +62,64 @@ export function Slider({
   label: string;
   low?: string;
   high?: string;
-  defaultValue?: number;
+  defaultValue?: number | null;
   min?: number;
   max?: number;
 }) {
-  const [value, setValue] = useState<number>(defaultValue);
+  const [value, setValue] = useState<number | null>(defaultValue ?? null);
+  const mid = Math.round((min + max) / 2);
+
+  function activate() {
+    setValue(mid);
+  }
+
   return (
     <div className="rounded-lg border border-border bg-surface-2 px-3.5 py-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-medium text-foreground">{label}</span>
-        <span className="flex h-7 min-w-[2rem] items-center justify-center rounded-md bg-surface-3 px-2 text-sm font-semibold tabular-nums text-accent">
-          {value}
-        </span>
+        {value !== null ? (
+          <span className="flex h-7 min-w-[2rem] items-center justify-center rounded-md bg-surface-3 px-2 text-sm font-semibold tabular-nums text-accent">
+            {value}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={activate}
+            className="flex h-7 items-center rounded-md border border-dashed border-border-strong px-2 text-xs text-muted-2 transition hover:border-accent hover:text-accent"
+          >
+            tap to rate
+          </button>
+        )}
       </div>
-      <input
-        type="range"
-        name={name}
-        min={min}
-        max={max}
-        step={1}
-        value={value}
-        onChange={(e) => setValue(Number(e.target.value))}
-      />
-      {low || high ? (
-        <div className="mt-1.5 flex justify-between text-[11px] text-muted-2">
-          <span>{low}</span>
-          <span>{high}</span>
-        </div>
-      ) : null}
+
+      {value !== null ? (
+        <>
+          {/* Field is only rendered (and submitted) once the athlete activates. */}
+          <input
+            type="range"
+            name={name}
+            min={min}
+            max={max}
+            step={1}
+            value={value}
+            onChange={(e) => setValue(Number(e.target.value))}
+          />
+          {low || high ? (
+            <div className="mt-1.5 flex justify-between text-[11px] text-muted-2">
+              <span>{low}</span>
+              <span>{high}</span>
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={activate}
+          className="w-full rounded-md border border-dashed border-border bg-surface-3/50 py-2.5 text-center text-xs text-muted-2 transition hover:border-accent hover:text-accent"
+        >
+          Not rated — tap to set
+        </button>
+      )}
     </div>
   );
 }

@@ -47,12 +47,25 @@ export default async function FeedbackPage({
         </p>
       </div>
 
-      {/* Recap of the recommendation being rated */}
-      <div className="card-tight mb-6 bg-surface-2">
-        <div className="eyebrow mb-1.5 text-accent">The recommendation</div>
-        <div className="text-sm text-foreground">
-          <Prose text={r.recommendation} />
+      {/* Recap of the recommendation and prediction being rated */}
+      <div className="mb-6 space-y-3">
+        <div className="card-tight bg-surface-2">
+          <div className="eyebrow mb-1.5 text-accent">The recommendation</div>
+          <div className="text-sm text-foreground">
+            <Prose text={r.recommendation} />
+          </div>
         </div>
+        {r.prediction && r.prediction.trim() ? (
+          <div className="card-tight bg-surface-2">
+            <div className="eyebrow mb-1.5 text-muted-2">The prediction</div>
+            <div className="text-sm text-foreground">
+              <Prose text={r.prediction} />
+            </div>
+            <p className="mt-2 text-[11px] text-muted-2">
+              When you rate "Did the prediction come true?" below, use this.
+            </p>
+          </div>
+        ) : null}
       </div>
 
       <FeedbackForm responseId={id} existing={(feedback as UserFeedback) ?? null} />

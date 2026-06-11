@@ -15,6 +15,7 @@ export type FormState = { error: string | null; ok?: boolean; message?: string }
 type DbClient = Awaited<ReturnType<typeof createClient>>;
 
 const MAX_BYTES = 10 * 1024 * 1024; // ~10MB
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ALLOWED_SOURCES = [
   "whoop",
   "apple_health",
@@ -50,10 +51,12 @@ export async function uploadScreenshot(
   const source = String(formData.get("source") ?? "");
   const note = String(formData.get("note") ?? "").trim() || null;
   const captureDateRaw = String(formData.get("capture_date") ?? "").trim();
-  const captureDate = captureDateRaw === "" ? null : captureDateRaw;
+  const captureDate = DATE_RE.test(captureDateRaw) ? captureDateRaw : null;
 
   if (!ALLOWED_SOURCES.includes(source))
     return { error: "Please choose which app these screenshots are from." };
+  if (!captureDate)
+    return { error: "Please set the date for these screenshots." };
   if (files.length === 0)
     return { error: "Please choose at least one image to upload." };
 
@@ -107,9 +110,10 @@ export async function uploadScreenshot(
     // Read the numbers off the screenshot and store them as a PENDING reading.
     // They are NOT written into the check-in here — the athlete reviews and
     // confirms first (see applyScreenshotReading), so a misread can't silently
-    // reach the coach. Awaited + never throws, so a parse failure can't break
-    // the upload itself.
-    await runOcr(supabase, {
+    // reach the coach. Fire-and-forget: we don't await so the upload returns
+    // immediately once storage + row insert succeed. runOcr records its own
+    // status/errors in the DB (parse_status, parse_error) and never throws.
+    void runOcr(supabase, {
       screenshotId: inserted.id as string,
       source: source as ScreenshotSource,
       note,
@@ -196,13 +200,17 @@ async function runOcr(
 
 // ----------------------------------------------------------------------------
 // Confirm a pending reading — the athlete reviewed (and possibly edited) the
-// numbers and is applying them to their check-in. Confirmed values WIN: the
-// fields they kept overwrite the check-in for the screenshot's date. Subjective
-// sliders (mood/energy/etc.) are never touched.
+// numbers and is applying them to their check-in. Coalesce: confirmed values
+// only fill fields that are currently null in the check-in — they never
+// overwrite a value the athlete entered manually. Subjective sliders
+// (mood/energy/etc.) are never touched.
 // ----------------------------------------------------------------------------
 export async function applyScreenshotReading(
   screenshotId: string,
   values: Partial<Record<keyof ExtractedCheckin, number | null>>,
+  // The browser passes the athlete's local date so we never use the UTC
+  // server timestamp as a fallback. Falls back to capture_date on the row.
+  clientDate?: string,
 ): Promise<FormState> {
   const supabase = await createClient();
   const {
@@ -220,7 +228,12 @@ export async function applyScreenshotReading(
     return { error: "That screenshot was not found." };
   }
   const s = shot as { capture_date: string | null; created_at: string };
-  const date = s.capture_date ?? s.created_at.slice(0, 10);
+  // Use capture_date from the row, or the browser-supplied local date as
+  // fallback. Never use created_at (UTC server time) — it rolls over a day
+  // early for US evening users and would write to the wrong check-in.
+  const validClient = clientDate && DATE_RE.test(clientDate) ? clientDate : null;
+  const date = s.capture_date ?? validClient;
+  if (!date) return { error: "Could not determine which day's check-in to update. Please re-upload the screenshot with a date set." };
 
   // Keep only valid numbers the user confirmed; build the canonical reading too.
   const clean: Record<string, number> = {};
@@ -238,16 +251,27 @@ export async function applyScreenshotReading(
   if (Object.keys(clean).length > 0) {
     const { data: existing } = await supabase
       .from("daily_checkins")
-      .select("id")
+      .select(`id, ${EXTRACTED_FIELDS.join(", ")}`)
       .eq("user_id", user.id)
       .eq("checkin_date", date)
       .maybeSingle();
     if (existing) {
-      await supabase
-        .from("daily_checkins")
-        .update(clean)
-        .eq("id", (existing as { id: string }).id);
+      // Coalesce: only fill fields the athlete hasn't already entered manually.
+      // Any existing value in the DB (even 0) wins over the OCR reading so a
+      // confirmed screenshot can never silently overwrite something they typed.
+      const row = existing as Record<string, unknown>;
+      const toWrite: Record<string, number> = {};
+      for (const [k, v] of Object.entries(clean)) {
+        if (row[k] === null || row[k] === undefined) toWrite[k] = v as number;
+      }
+      if (Object.keys(toWrite).length > 0) {
+        await supabase
+          .from("daily_checkins")
+          .update(toWrite)
+          .eq("id", row.id as string);
+      }
     } else {
+      // No existing row — insert with all confirmed values.
       await supabase
         .from("daily_checkins")
         .insert({ user_id: user.id, checkin_date: date, ...clean });

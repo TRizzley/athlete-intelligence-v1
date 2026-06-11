@@ -102,7 +102,10 @@ function ReadingCard({ reading }: { reading: PendingReading }) {
       values[k] = Number.isFinite(n) ? n : null;
     }
     startTransition(async () => {
-      const res = await applyScreenshotReading(reading.id, values);
+      // Pass the browser's local date so the server never falls back to the
+      // UTC created_at timestamp. capture_date on the row is the primary key;
+      // todayISO() covers old records that were stored without one.
+      const res = await applyScreenshotReading(reading.id, values, reading.capture_date ?? todayISO());
       if (res.error) {
         setError(res.error);
         return;
@@ -192,7 +195,7 @@ function ReadingCard({ reading }: { reading: PendingReading }) {
           Discard reading
         </button>
         <span className="ml-auto text-[11px] text-muted-2">
-          Confirmed values overwrite this day&apos;s check-in.
+          Fills blank fields — won&apos;t overwrite values you&apos;ve already entered.
         </span>
       </div>
     </div>

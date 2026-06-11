@@ -236,14 +236,33 @@ export async function POST(request: Request) {
   // 4d. Close the prediction loop: score any past prediction whose target day
   //     now has a check-in and hasn't been graded yet. Newly scored outcomes
   //     are merged in-memory so they also inform today's decision below.
+  //
+  //     Broadened scoring window: the 8-check-in window above may not cover
+  //     older target dates. For any unscored prediction whose target_date
+  //     falls outside our in-memory map, we fetch that specific check-in
+  //     directly so no prediction goes unscored due to window size.
   const predsAll = (predictionsRes.data as PredictionWithOutcome[]) ?? [];
   const checkinByDate = new Map(checkins.map((c) => [c.checkin_date, c]));
+
   for (const p of predsAll) {
     const po = p.prediction_outcomes;
     const alreadyScored = Array.isArray(po) ? po.length > 0 : !!po;
     if (alreadyScored || !p.target_date) continue;
-    const actual = checkinByDate.get(p.target_date) ?? null;
-    if (!actual) continue; // no data for the target day yet
+
+    // Resolve the check-in for the target date — from in-memory map first,
+    // then fall back to a targeted DB fetch for older predictions.
+    let actual = checkinByDate.get(p.target_date) ?? null;
+    if (!actual) {
+      const { data: fetchedRow } = await admin
+        .from("daily_checkins")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("checkin_date", p.target_date)
+        .maybeSingle();
+      actual = (fetchedRow as DailyCheckin) ?? null;
+      if (actual) checkinByDate.set(p.target_date, actual); // cache for reuse
+    }
+    if (!actual) continue; // genuinely no check-in for this target date yet
 
     // Baseline = the most recent check-in strictly before the target day.
     const prior =
@@ -287,6 +306,36 @@ export async function POST(request: Request) {
     }
   }
 
+  // 4e. Compute program context — where the athlete is in their journey.
+  //     Uses the earliest check-in in the 8-day window as a proxy; if they've
+  //     been at it longer than the window, the count and week are still useful.
+  const oldestInWindow = checkins[checkins.length - 1];
+  let programContext: CoachContext["programContext"] | undefined;
+  if (oldestInWindow) {
+    // Fetch the very first check-in for an accurate day count.
+    const { data: firstCiRow } = await admin
+      .from("daily_checkins")
+      .select("checkin_date")
+      .eq("user_id", userId)
+      .order("checkin_date", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    const { count: totalCi } = await admin
+      .from("daily_checkins")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId);
+    const firstDate = (firstCiRow as { checkin_date: string } | null)?.checkin_date ?? oldestInWindow.checkin_date;
+    const dayNum = Math.floor(
+      (Date.parse(responseDate + "T00:00:00Z") - Date.parse(firstDate + "T00:00:00Z")) / 86400000,
+    ) + 1;
+    programContext = {
+      dayNumber: Math.max(1, dayNum),
+      programWeek: Math.ceil(Math.max(1, dayNum) / 7),
+      totalCheckins: totalCi ?? checkins.length,
+      firstCheckinDate: firstDate,
+    };
+  }
+
   // 5. Build context and ask Claude for the decision.
   const ctx: CoachContext = {
     athleteName: userRec?.full_name || profile?.full_name || userRec?.email || null,
@@ -301,6 +350,7 @@ export async function POST(request: Request) {
     feedback: (feedbackRes.data as UserFeedback[]) ?? [],
     recentWorkouts,
     recentMessages,
+    programContext,
   };
 
   let draft;

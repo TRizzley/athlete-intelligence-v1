@@ -110,7 +110,7 @@ export function PostWorkoutForm({
               </p>
             ) : null}
           </Field>
-          <Slider name="workout_intensity" label="Intensity / effort (RPE)" low="Easy" high="All-out" defaultValue={c?.workout_intensity ?? 5} />
+          <Slider name="workout_intensity" label="Intensity / effort (RPE)" low="Easy" high="All-out" defaultValue={c?.workout_intensity ?? null} />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Load / key lifts" htmlFor="training_load" hint='Free text — e.g. "Squat 225x5, 245x3"'>

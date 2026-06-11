@@ -45,21 +45,6 @@ export function OnboardingForm({
               placeholder="Jordan Athlete"
             />
           </Field>
-          <Field
-            label="Mobile number"
-            htmlFor="phone"
-            hint="For check-in reminder texts"
-          >
-            <input
-              id="phone"
-              name="phone"
-              type="tel"
-              inputMode="tel"
-              defaultValue={p?.phone ?? ""}
-              className="input"
-              placeholder="(555) 123-4567"
-            />
-          </Field>
         </div>
 
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

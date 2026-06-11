@@ -15,6 +15,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { generateCoachDraft, type CoachContext, type ChatTurn } from "@/lib/coach-ai";
 import { todayISO } from "@/lib/format";
 import type {
@@ -52,6 +53,10 @@ export async function POST(request: Request) {
     .maybeSingle();
   if (me?.role !== "admin") return bad("Admins only.", 403);
 
+  // Service-role client for all athlete data access — bypasses RLS so a gap
+  // in an admin policy can never silently return partial context to Claude.
+  const admin = createAdminClient();
+
   // 2. Parse input.
   let body: { user_id?: string; response_date?: string };
   try {
@@ -66,7 +71,7 @@ export async function POST(request: Request) {
       ? body.response_date
       : todayISO();
 
-  // 3. Gather the athlete's full context (admins can read all rows via RLS).
+  // 3. Gather the athlete's full context (service role — bypasses RLS).
   const [
     userRes,
     profileRes,
@@ -77,40 +82,40 @@ export async function POST(request: Request) {
     feedbackRes,
     memoryRes,
   ] = await Promise.all([
-    supabase.from("users").select("full_name, email").eq("id", userId).maybeSingle(),
-    supabase.from("athlete_profiles").select("*").eq("user_id", userId).maybeSingle(),
-    supabase
+    admin.from("users").select("full_name, email").eq("id", userId).maybeSingle(),
+    admin.from("athlete_profiles").select("*").eq("user_id", userId).maybeSingle(),
+    admin
       .from("daily_checkins")
       .select("*")
       .eq("user_id", userId)
       .order("checkin_date", { ascending: false })
       .limit(8),
-    supabase
+    admin
       .from("uploaded_screenshots")
       .select("*")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(12),
-    supabase
+    admin
       .from("coach_responses")
       .select("*")
       .eq("user_id", userId)
       .order("response_date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(10),
-    supabase
+    admin
       .from("predictions")
       .select("*, prediction_outcomes(*)")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(12),
-    supabase
+    admin
       .from("user_feedback")
       .select("*")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(12),
-    supabase
+    admin
       .from("athlete_memory_notes")
       .select("*")
       .eq("user_id", userId)
@@ -135,7 +140,7 @@ export async function POST(request: Request) {
   const chatSince = new Date(
     Date.parse(responseDate + "T00:00:00Z") - 7 * 86400000,
   ).toISOString();
-  const { data: messageRows } = await supabase
+  const { data: messageRows } = await admin
     .from("coach_messages")
     .select("role, body, created_at")
     .eq("user_id", userId)
@@ -172,7 +177,7 @@ export async function POST(request: Request) {
   // 5. Replace any existing AI draft for this day (keeps "regenerate" clean),
   //    then save the fresh draft. Sent responses and hand-written drafts are
   //    never touched.
-  await supabase
+  await admin
     .from("coach_responses")
     .delete()
     .eq("user_id", userId)
@@ -180,7 +185,7 @@ export async function POST(request: Request) {
     .eq("status", "draft")
     .eq("ai_generated", true);
 
-  const { data: inserted, error: insertError } = await supabase
+  const { data: inserted, error: insertError } = await admin
     .from("coach_responses")
     .insert({
       user_id: userId,

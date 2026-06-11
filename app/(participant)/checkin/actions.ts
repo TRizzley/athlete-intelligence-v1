@@ -3,6 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { distillMemoryFromCheckin } from "@/lib/coach-ai";
+import type { AthleteMemoryNote } from "@/lib/types";
 
 export type FormState = { error: string | null };
 
@@ -109,6 +112,44 @@ export async function saveCheckin(
   }
 
   console.log(`[checkin] saved for user=${user.id} date=${checkinDate}`);
+
+  // Background: distill any durable facts from the check-in's free-text fields
+  // into memory notes. Non-blocking — we fire and don't await so the redirect
+  // happens immediately. Uses admin client (memory notes are RLS-restricted to
+  // admin writes). Failure is silently swallowed inside distillMemoryFromCheckin.
+  const openComments = payload.open_comments ?? null;
+  const painNote = payload.pain_injury_note ?? null;
+  if (openComments || painNote) {
+    const admin = createAdminClient();
+    // Fetch existing notes then distill — run in background, don't block.
+    void (async () => {
+      try {
+        const { data: notesData } = await admin
+          .from("athlete_memory_notes")
+          .select("category, note")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
+        const existing = (notesData as Pick<AthleteMemoryNote, "category" | "note">[] | null) ?? [];
+        const newNotes = await distillMemoryFromCheckin(existing, {
+          open_comments: openComments,
+          pain_injury_note: painNote,
+        });
+        if (newNotes.length > 0) {
+          await admin.from("athlete_memory_notes").insert(
+            newNotes.map((n) => ({
+              user_id: user.id,
+              category: n.category ?? "constraint",
+              note: n.note,
+              created_by: user.id,
+            })),
+          );
+          console.log(`[checkin] distilled ${newNotes.length} memory note(s) for user=${user.id}`);
+        }
+      } catch {
+        // Never surface distillation errors to the athlete
+      }
+    })();
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/checkin");
