@@ -26,17 +26,10 @@ import {
   type CoachContext,
   type ChatTurn,
 } from "@/lib/coach-ai";
+import { buildCoachContext } from "@/lib/context";
 import { buildTrustSnapshotRow, flattenOutcomes } from "@/lib/metrics";
 import { todayISO } from "@/lib/format";
-import type {
-  AthleteProfile,
-  DailyCheckin,
-  UploadedScreenshot,
-  CoachResponse,
-  PredictionWithOutcome,
-  UserFeedback,
-  AthleteMemoryNote,
-} from "@/lib/types";
+import type { DailyCheckin } from "@/lib/types";
 
 // Drafting can take 10-20s; give it room.
 export const maxDuration = 60;
@@ -73,75 +66,40 @@ export async function POST(request: Request) {
   const userId = user.id;
   const admin = createAdminClient();
 
-  // 2. Gather the athlete's full context (service role bypasses RLS).
-  const [
-    userRes,
-    profileRes,
-    checkinsRes,
-    shotsRes,
-    responsesRes,
-    predictionsRes,
-    feedbackRes,
-    memoryRes,
-  ] = await Promise.all([
-    admin.from("users").select("full_name, email").eq("id", userId).maybeSingle(),
-    admin.from("athlete_profiles").select("*").eq("user_id", userId).maybeSingle(),
-    admin
-      .from("daily_checkins")
-      .select("*")
-      .eq("user_id", userId)
-      .order("checkin_date", { ascending: false })
-      .limit(8),
-    admin
-      .from("uploaded_screenshots")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(12),
-    admin
-      .from("coach_responses")
-      .select("*")
-      .eq("user_id", userId)
-      .order("response_date", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(10),
-    admin
-      .from("predictions")
-      .select("*, prediction_outcomes(*)")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(12),
-    admin
-      .from("user_feedback")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(12),
-    admin
-      .from("athlete_memory_notes")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false }),
-  ]);
+  // 2. Pre-flight idempotency check — one cheap query before the expensive context
+  //    fetch. This route runs on every dashboard load; skip immediately when we've
+  //    already generated for today.
+  const { data: existingCheck } = await admin
+    .from("coach_responses")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("response_date", responseDate)
+    .eq("ai_generated", true)
+    .limit(1)
+    .maybeSingle();
+  if (existingCheck) {
+    return json({
+      ok: true,
+      skipped: "already generated for today",
+      id: (existingCheck as { id: string }).id,
+    });
+  }
 
-  const userRec = userRes.data as { full_name: string | null; email: string | null } | null;
-  const profile = (profileRes.data as AthleteProfile) ?? null;
-  const checkins = (checkinsRes.data as DailyCheckin[]) ?? [];
-  const screenshots = (shotsRes.data as UploadedScreenshot[]) ?? [];
-  const previousResponses = (responsesRes.data as CoachResponse[]) ?? [];
+  // 3. Gather the athlete's full context (service role — bypasses RLS).
+  const baseCtx = await buildCoachContext(userId, admin, responseDate);
 
-  // 3. Guard: need something to reason from.
-  if (!profile && checkins.length === 0) {
+  // 4. Guard: need something to reason from.
+  if (!baseCtx.profile && baseCtx.recentCheckins.length === 0) {
     return json({ ok: true, skipped: "no data yet" });
+  }
+  const latestCheckin = baseCtx.latestCheckin;
+  if (!latestCheckin) {
+    return json({ ok: true, skipped: "no check-ins yet" });
   }
   // "Report yesterday, plan today": the decision for TODAY is built from the most
   // recent COMPLETED-day results — normally yesterday's check-in. We don't wait
   // for a check-in dated today; we plan today from the latest results we have,
   // as long as they're recent enough (within ~2 days) to be relevant.
-  const latestCheckin = checkins[0] ?? null;
-  if (!latestCheckin) {
-    return json({ ok: true, skipped: "no check-ins yet" });
-  }
   const ageDays =
     (Date.parse(responseDate + "T00:00:00Z") -
       Date.parse(latestCheckin.checkin_date + "T00:00:00Z")) /
@@ -150,75 +108,8 @@ export async function POST(request: Request) {
     return json({ ok: true, skipped: "no recent check-in to plan from" });
   }
 
-  // 4. Freeze the morning decision. Once today's decision has been generated, it
-  //    stays put for the rest of the day — later data (most importantly the
-  //    post-workout check-in) must NOT rewrite today's call. That post-workout
-  //    data instead flows into TOMORROW's decision (auto-respond reads the recent
-  //    check-ins) and into scoring today's prediction. So generate at most once
-  //    per day: if an auto response already exists for this date, leave it alone.
-  const existingAuto = previousResponses.find(
-    (r) => r.response_date === responseDate && r.ai_generated,
-  );
-  if (existingAuto) {
-    return json({ ok: true, skipped: "already generated for today", id: existingAuto.id });
-  }
-
-  // 4b. Recent logged workouts (per-set weight + reps) for progression context.
-  const { data: sessionRows } = await admin
-    .from("workout_sessions")
-    .select("id, session_date, day_name, notes")
-    .eq("user_id", userId)
-    .order("session_date", { ascending: false })
-    .limit(5);
-  const sessions =
-    (sessionRows as {
-      id: string;
-      session_date: string;
-      day_name: string | null;
-      notes: string | null;
-    }[]) ?? [];
-
-  let recentWorkouts: CoachContext["recentWorkouts"] = [];
-  if (sessions.length > 0) {
-    const { data: setRows } = await admin
-      .from("workout_set_logs")
-      .select("session_id, exercise_name, muscle_group, set_number, weight, reps")
-      .in(
-        "session_id",
-        sessions.map((s) => s.id),
-      )
-      .order("position", { ascending: true });
-    const bySession = new Map<string, typeof setRows>();
-    (setRows ?? []).forEach((r) => {
-      const arr = bySession.get((r as { session_id: string }).session_id) ?? [];
-      arr.push(r);
-      bySession.set((r as { session_id: string }).session_id, arr);
-    });
-    recentWorkouts = sessions.map((s) => ({
-      session_date: s.session_date,
-      day_name: s.day_name,
-      notes: s.notes,
-      sets: (bySession.get(s.id) ?? []).map((r) => {
-        const row = r as {
-          exercise_name: string;
-          muscle_group: string | null;
-          set_number: number;
-          weight: number | null;
-          reps: number | null;
-        };
-        return {
-          exercise: row.exercise_name,
-          muscle: row.muscle_group,
-          set: row.set_number,
-          weight: row.weight,
-          reps: row.reps,
-        };
-      }),
-    }));
-  }
-
-  // 4c. Recent chat (last ~7 days) so the decision reflects what the athlete
-  //     told the coach between daily reports.
+  // 5. Recent chat (last ~7 days) so the decision reflects what the athlete
+  //    told the coach between daily reports.
   const chatSince = new Date(
     Date.parse(responseDate + "T00:00:00Z") - 7 * 86400000,
   ).toISOString();
@@ -233,15 +124,16 @@ export async function POST(request: Request) {
     (messageRows as { role: "athlete" | "coach"; body: string }[]) ?? []
   ).map((m) => ({ role: m.role, body: m.body }));
 
-  // 4d. Close the prediction loop: score any past prediction whose target day
-  //     now has a check-in and hasn't been graded yet. Newly scored outcomes
-  //     are merged in-memory so they also inform today's decision below.
+  // 6. Close the prediction loop: score any past prediction whose target day now
+  //    has a check-in and hasn't been graded yet. Newly scored outcomes are merged
+  //    in-memory so they also inform today's decision below.
   //
-  //     Broadened scoring window: the 8-check-in window above may not cover
-  //     older target dates. For any unscored prediction whose target_date
-  //     falls outside our in-memory map, we fetch that specific check-in
-  //     directly so no prediction goes unscored due to window size.
-  const predsAll = (predictionsRes.data as PredictionWithOutcome[]) ?? [];
+  //    Broadened scoring window: the 8-check-in window may not cover older target
+  //    dates. For any unscored prediction whose target_date falls outside our
+  //    in-memory map, we fetch that specific check-in directly so no prediction
+  //    goes unscored due to window size.
+  const predsAll = baseCtx.predictions;
+  const checkins = baseCtx.recentCheckins;
   const checkinByDate = new Map(checkins.map((c) => [c.checkin_date, c]));
 
   for (const p of predsAll) {
@@ -306,9 +198,9 @@ export async function POST(request: Request) {
     }
   }
 
-  // 4e. Compute program context — where the athlete is in their journey.
-  //     Uses the earliest check-in in the 8-day window as a proxy; if they've
-  //     been at it longer than the window, the count and week are still useful.
+  // 7. Compute program context — where the athlete is in their journey.
+  //    Uses the earliest check-in in the 8-day window as a proxy; if they've
+  //    been at it longer than the window, the count and week are still useful.
   const oldestInWindow = checkins[checkins.length - 1];
   let programContext: CoachContext["programContext"] | undefined;
   if (oldestInWindow) {
@@ -324,10 +216,15 @@ export async function POST(request: Request) {
       .from("daily_checkins")
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId);
-    const firstDate = (firstCiRow as { checkin_date: string } | null)?.checkin_date ?? oldestInWindow.checkin_date;
-    const dayNum = Math.floor(
-      (Date.parse(responseDate + "T00:00:00Z") - Date.parse(firstDate + "T00:00:00Z")) / 86400000,
-    ) + 1;
+    const firstDate =
+      (firstCiRow as { checkin_date: string } | null)?.checkin_date ??
+      oldestInWindow.checkin_date;
+    const dayNum =
+      Math.floor(
+        (Date.parse(responseDate + "T00:00:00Z") -
+          Date.parse(firstDate + "T00:00:00Z")) /
+          86400000,
+      ) + 1;
     programContext = {
       dayNumber: Math.max(1, dayNum),
       programWeek: Math.ceil(Math.max(1, dayNum) / 7),
@@ -336,19 +233,10 @@ export async function POST(request: Request) {
     };
   }
 
-  // 5. Build context and ask Claude for the decision.
+  // 8. Assemble the final context for Claude.
   const ctx: CoachContext = {
-    athleteName: userRec?.full_name || profile?.full_name || userRec?.email || null,
-    today: responseDate,
-    profile,
-    latestCheckin: checkins[0] ?? null,
-    recentCheckins: checkins,
-    screenshots,
-    memoryNotes: (memoryRes.data as AthleteMemoryNote[]) ?? [],
-    previousResponses,
-    predictions: predsAll,
-    feedback: (feedbackRes.data as UserFeedback[]) ?? [],
-    recentWorkouts,
+    ...baseCtx,
+    predictions: predsAll,  // includes any newly scored outcomes
     recentMessages,
     programContext,
   };
@@ -361,7 +249,7 @@ export async function POST(request: Request) {
     return json({ ok: false, error: message }, 502);
   }
 
-  // 6. Replace any prior auto response for the day (and its tracked prediction),
+  // 9. Replace any prior auto response for the day (and its tracked prediction),
   //    then SEND the fresh one.
   const { data: olds } = await admin
     .from("coach_responses")
@@ -399,7 +287,7 @@ export async function POST(request: Request) {
     return json({ ok: false, error: insertError?.message ?? "Could not save the response." }, 500);
   }
 
-  // 7. Log a tracked, scoreable prediction so the accuracy metric fills in.
+  // 10. Log a tracked, scoreable prediction so the accuracy metric fills in.
   if (draft.prediction) {
     await admin.from("predictions").insert({
       user_id: userId,
@@ -412,8 +300,8 @@ export async function POST(request: Request) {
     });
   }
 
-  // 8. Refresh today's trust snapshot so the table builds a daily time series
-  //    automatically (idempotent upsert on user_id + snapshot_date). Best-effort.
+  // 11. Refresh today's trust snapshot so the table builds a daily time series
+  //     automatically (idempotent upsert on user_id + snapshot_date). Best-effort.
   try {
     const { count: responsesSent } = await admin
       .from("coach_responses")
@@ -424,7 +312,7 @@ export async function POST(request: Request) {
     const snapshotRow = buildTrustSnapshotRow({
       userId,
       date: responseDate,
-      feedback: (feedbackRes.data as UserFeedback[]) ?? [],
+      feedback: baseCtx.feedback,
       outcomes: flattenOutcomes(predsAll),
       predictionsTotal: predsAll.length,
       responsesSent: responsesSent ?? 0,

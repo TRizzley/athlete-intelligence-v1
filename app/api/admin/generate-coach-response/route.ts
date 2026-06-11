@@ -16,17 +16,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { generateCoachDraft, type CoachContext, type ChatTurn } from "@/lib/coach-ai";
+import { generateCoachDraft, type ChatTurn } from "@/lib/coach-ai";
+import { buildCoachContext } from "@/lib/context";
 import { todayISO } from "@/lib/format";
-import type {
-  AthleteProfile,
-  DailyCheckin,
-  UploadedScreenshot,
-  CoachResponse,
-  PredictionWithOutcome,
-  UserFeedback,
-  AthleteMemoryNote,
-} from "@/lib/types";
 
 // Drafting can take 10–20s on a larger model; give it room.
 export const maxDuration = 60;
@@ -71,72 +63,8 @@ export async function POST(request: Request) {
       ? body.response_date
       : todayISO();
 
-  // 3. Gather the athlete's full context (service role — bypasses RLS).
-  const [
-    userRes,
-    profileRes,
-    checkinsRes,
-    shotsRes,
-    responsesRes,
-    predictionsRes,
-    feedbackRes,
-    memoryRes,
-  ] = await Promise.all([
-    admin.from("users").select("full_name, email").eq("id", userId).maybeSingle(),
-    admin.from("athlete_profiles").select("*").eq("user_id", userId).maybeSingle(),
-    admin
-      .from("daily_checkins")
-      .select("*")
-      .eq("user_id", userId)
-      .order("checkin_date", { ascending: false })
-      .limit(8),
-    admin
-      .from("uploaded_screenshots")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(12),
-    admin
-      .from("coach_responses")
-      .select("*")
-      .eq("user_id", userId)
-      .order("response_date", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(10),
-    admin
-      .from("predictions")
-      .select("*, prediction_outcomes(*)")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(12),
-    admin
-      .from("user_feedback")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(12),
-    admin
-      .from("athlete_memory_notes")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false }),
-  ]);
-
-  const userRec = userRes.data as { full_name: string | null; email: string | null } | null;
-  if (!userRec) return bad("Athlete not found.", 404);
-
-  const profile = (profileRes.data as AthleteProfile) ?? null;
-  const checkins = (checkinsRes.data as DailyCheckin[]) ?? [];
-
-  // Nothing to reason about — don't waste an API call or invent data.
-  if (!profile && checkins.length === 0) {
-    return bad(
-      "This athlete has no profile or check-ins yet — there's nothing to draft from.",
-    );
-  }
-
-  // Recent chat (last ~7 days) so the draft reflects what the athlete told the
-  // coach between daily reports.
+  // 3. Recent chat (last ~7 days) so the draft reflects what the athlete told
+  //    the coach between daily reports.
   const chatSince = new Date(
     Date.parse(responseDate + "T00:00:00Z") - 7 * 86400000,
   ).toISOString();
@@ -151,21 +79,17 @@ export async function POST(request: Request) {
     (messageRows as { role: "athlete" | "coach"; body: string }[]) ?? []
   ).map((m) => ({ role: m.role, body: m.body }));
 
-  const ctx: CoachContext = {
-    athleteName: userRec.full_name || profile?.full_name || userRec.email || null,
-    today: responseDate,
-    profile,
-    latestCheckin: checkins[0] ?? null,
-    recentCheckins: checkins,
-    screenshots: (shotsRes.data as UploadedScreenshot[]) ?? [],
-    memoryNotes: (memoryRes.data as AthleteMemoryNote[]) ?? [],
-    previousResponses: (responsesRes.data as CoachResponse[]) ?? [],
-    predictions: (predictionsRes.data as PredictionWithOutcome[]) ?? [],
-    feedback: (feedbackRes.data as UserFeedback[]) ?? [],
-    recentMessages,
-  };
+  // 4. Gather the athlete's full context (service role — bypasses RLS).
+  const ctx = await buildCoachContext(userId, admin, responseDate, { recentMessages });
 
-  // 4. Ask Claude for the draft.
+  // Nothing to reason about — don't waste an API call or invent data.
+  if (!ctx.profile && ctx.recentCheckins.length === 0) {
+    return bad(
+      "This athlete has no profile or check-ins yet — there's nothing to draft from.",
+    );
+  }
+
+  // 5. Ask Claude for the draft.
   let draft;
   try {
     draft = await generateCoachDraft(ctx);
@@ -174,7 +98,7 @@ export async function POST(request: Request) {
     return bad(message, 502);
   }
 
-  // 5. Replace any existing AI draft for this day (keeps "regenerate" clean),
+  // 6. Replace any existing AI draft for this day (keeps "regenerate" clean),
   //    then save the fresh draft. Sent responses and hand-written drafts are
   //    never touched.
   await admin

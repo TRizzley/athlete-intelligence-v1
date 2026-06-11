@@ -259,7 +259,7 @@ export async function applyScreenshotReading(
       // Coalesce: only fill fields the athlete hasn't already entered manually.
       // Any existing value in the DB (even 0) wins over the OCR reading so a
       // confirmed screenshot can never silently overwrite something they typed.
-      const row = existing as Record<string, unknown>;
+      const row = existing as unknown as Record<string, unknown>;
       const toWrite: Record<string, number> = {};
       for (const [k, v] of Object.entries(clean)) {
         if (row[k] === null || row[k] === undefined) toWrite[k] = v as number;

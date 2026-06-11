@@ -6,20 +6,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   generateCoachChatReply,
   distillMemoryFromChat,
-  type CoachContext,
   type ChatTurn,
 } from "@/lib/coach-ai";
+import { buildCoachContext } from "@/lib/context";
 import { todayISO } from "@/lib/format";
-import type {
-  AthleteProfile,
-  DailyCheckin,
-  UploadedScreenshot,
-  CoachResponse,
-  PredictionWithOutcome,
-  UserFeedback,
-  AthleteMemoryNote,
-  CoachMessage,
-} from "@/lib/types";
+import type { CoachMessage } from "@/lib/types";
 
 export type FormState = { error: string | null; ok?: boolean };
 
@@ -75,142 +66,27 @@ export async function sendMessage(
   const admin = createAdminClient();
   const userId = user.id;
 
-  const [
-    userRes,
-    profileRes,
-    checkinsRes,
-    shotsRes,
-    responsesRes,
-    predictionsRes,
-    feedbackRes,
-    memoryRes,
-    messagesRes,
-  ] = await Promise.all([
-    admin.from("users").select("full_name, email").eq("id", userId).maybeSingle(),
-    admin.from("athlete_profiles").select("*").eq("user_id", userId).maybeSingle(),
-    admin
-      .from("daily_checkins")
-      .select("*")
-      .eq("user_id", userId)
-      .order("checkin_date", { ascending: false })
-      .limit(8),
-    admin
-      .from("uploaded_screenshots")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(8),
-    admin
-      .from("coach_responses")
-      .select("*")
-      .eq("user_id", userId)
-      .order("response_date", { ascending: false })
-      .limit(5),
-    admin
-      .from("predictions")
-      .select("*, prediction_outcomes(*)")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(8),
-    admin
-      .from("user_feedback")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(8),
-    admin
-      .from("athlete_memory_notes")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false }),
+  // Fetch conversation history and full context in parallel.
+  const [messagesRes, ctx] = await Promise.all([
     admin
       .from("coach_messages")
       .select("*")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(30),
+    buildCoachContext(userId, admin, localToday, {
+      screenshotLimit: 8,
+      responseLimit: 5,
+      predictionLimit: 8,
+      feedbackLimit: 8,
+    }),
   ]);
-
-  const userRec = userRes.data as { full_name: string | null; email: string | null } | null;
-  const profile = (profileRes.data as AthleteProfile) ?? null;
-  const checkins = (checkinsRes.data as DailyCheckin[]) ?? [];
-
-  // Recent logged workouts for progression context.
-  const { data: sessionRows } = await admin
-    .from("workout_sessions")
-    .select("id, session_date, day_name, notes")
-    .eq("user_id", userId)
-    .order("session_date", { ascending: false })
-    .limit(5);
-  const sessions =
-    (sessionRows as {
-      id: string;
-      session_date: string;
-      day_name: string | null;
-      notes: string | null;
-    }[]) ?? [];
-
-  let recentWorkouts: CoachContext["recentWorkouts"] = [];
-  if (sessions.length > 0) {
-    const { data: setRows } = await admin
-      .from("workout_set_logs")
-      .select("session_id, exercise_name, muscle_group, set_number, weight, reps")
-      .in(
-        "session_id",
-        sessions.map((s) => s.id),
-      )
-      .order("position", { ascending: true });
-    const bySession = new Map<string, typeof setRows>();
-    (setRows ?? []).forEach((r) => {
-      const sid = (r as { session_id: string }).session_id;
-      const arr = bySession.get(sid) ?? [];
-      arr.push(r);
-      bySession.set(sid, arr);
-    });
-    recentWorkouts = sessions.map((s) => ({
-      session_date: s.session_date,
-      day_name: s.day_name,
-      notes: s.notes,
-      sets: (bySession.get(s.id) ?? []).map((r) => {
-        const row = r as {
-          exercise_name: string;
-          muscle_group: string | null;
-          set_number: number;
-          weight: number | null;
-          reps: number | null;
-        };
-        return {
-          exercise: row.exercise_name,
-          muscle: row.muscle_group,
-          set: row.set_number,
-          weight: row.weight,
-          reps: row.reps,
-        };
-      }),
-    }));
-  }
-
-  const ctx: CoachContext = {
-    athleteName: userRec?.full_name || profile?.full_name || userRec?.email || null,
-    today: localToday,
-    profile,
-    latestCheckin: checkins[0] ?? null,
-    recentCheckins: checkins,
-    screenshots: (shotsRes.data as UploadedScreenshot[]) ?? [],
-    memoryNotes: (memoryRes.data as AthleteMemoryNote[]) ?? [],
-    previousResponses: (responsesRes.data as CoachResponse[]) ?? [],
-    predictions: (predictionsRes.data as PredictionWithOutcome[]) ?? [],
-    feedback: (feedbackRes.data as UserFeedback[]) ?? [],
-    recentWorkouts,
-  };
 
   // Fetched newest-first for the limit; reverse to chronological for the model.
   const history: ChatTurn[] = ((messagesRes.data as CoachMessage[]) ?? [])
     .slice()
     .reverse()
     .map((m) => ({ role: m.role, body: m.body }));
-
-  const existingNotes = (memoryRes.data as AthleteMemoryNote[]) ?? [];
 
   try {
     const reply = await generateCoachChatReply(ctx, history);
@@ -236,7 +112,7 @@ export async function sendMessage(
     // Never let this block or break the chat reply.
     try {
       const newNotes = await distillMemoryFromChat(
-        existingNotes.map((n) => ({ category: n.category, note: n.note })),
+        ctx.memoryNotes.map((n) => ({ category: n.category, note: n.note })),
         [...history, { role: "coach", body: reply }],
       );
       if (newNotes.length > 0) {
