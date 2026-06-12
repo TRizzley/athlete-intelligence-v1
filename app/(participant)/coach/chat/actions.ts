@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateCoachChatReply } from "@/lib/coach-chat";
+import { friendlyCoachError } from "@/lib/coach-errors";
 import { distillMemoryFromChat } from "@/lib/coach-memory";
 import type { ChatTurn } from "@/lib/coach-types";
 import { buildCoachContext } from "@/lib/context";
@@ -128,10 +129,10 @@ export async function sendMessage(
       /* memory distillation is best-effort; ignore failures */
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : "The coach couldn't reply just now.";
+    const message = friendlyCoachError(err, "chat");
     // The athlete's message is already saved; surface a soft error so they can retry.
     revalidatePath("/coach/chat");
-    return { error: `Sent — but the coach hit an error replying: ${message}` };
+    return { error: `Sent — but ${message}` };
   }
 
   revalidatePath("/coach/chat");

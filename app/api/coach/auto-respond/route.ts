@@ -21,6 +21,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateCoachDraft } from "@/lib/coach-draft";
+import { friendlyCoachError } from "@/lib/coach-errors";
 import { scorePredictionOutcome } from "@/lib/coach-predictions";
 import type { CoachContext, ChatTurn } from "@/lib/coach-types";
 import { buildCoachContext } from "@/lib/context";
@@ -243,7 +244,7 @@ export async function POST(request: Request) {
   try {
     draft = await generateCoachDraft(ctx);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error generating decision.";
+    const message = friendlyCoachError(err, "auto-respond");
     return json({ ok: false, error: message }, 502);
   }
 

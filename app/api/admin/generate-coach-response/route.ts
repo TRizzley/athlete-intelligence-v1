@@ -17,6 +17,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { checkAdmin } from "@/lib/auth";
 import { generateCoachDraft } from "@/lib/coach-draft";
+import { friendlyCoachError } from "@/lib/coach-errors";
 import type { ChatTurn } from "@/lib/coach-types";
 import { buildCoachContext } from "@/lib/context";
 import { todayISO } from "@/lib/format";
@@ -85,7 +86,7 @@ export async function POST(request: Request) {
   try {
     draft = await generateCoachDraft(ctx);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error generating draft.";
+    const message = friendlyCoachError(err, "admin-draft");
     return bad(message, 502);
   }
 

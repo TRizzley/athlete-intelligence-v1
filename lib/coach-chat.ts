@@ -66,7 +66,17 @@ export async function generateCoachChatReply(
   const msg = await client.messages.create({
     model: process.env.COACH_MODEL || "claude-sonnet-4-6",
     max_tokens: 700,
-    system: `${CHAT_SYSTEM_PROMPT}\n\n${contextText}`,
+    // Prompt caching: the system prompt + athlete context is large and stable
+    // across the back-and-forth of a single conversation. Marking it ephemeral
+    // lets follow-up messages within ~5 min reuse the cached prefix at a fraction
+    // of the input cost instead of re-billing the whole context every turn.
+    system: [
+      {
+        type: "text",
+        text: `${CHAT_SYSTEM_PROMPT}\n\n${contextText}`,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
     messages,
   });
 

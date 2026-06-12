@@ -236,7 +236,9 @@ export async function extractFromScreenshot(params: {
   const client = new Anthropic({ apiKey });
 
   const msg = await client.messages.create({
-    model: process.env.OCR_MODEL || "claude-sonnet-4-6",
+    // Haiku is plenty for deterministic metric extraction and ~10x cheaper than
+    // Sonnet on the image input. Override with OCR_MODEL if accuracy ever needs it.
+    model: process.env.OCR_MODEL || "claude-haiku-4-5-20251001",
     max_tokens: 1024,
     // Deterministic: OCR should read the same screenshot the same way every time.
     temperature: 0,
@@ -268,7 +270,7 @@ export async function extractFromScreenshot(params: {
   return restrictToSource(sanitize(parsed), params.source);
 }
 
-/** True if the extraction produced at least one usable value. */
+/** True if at least one field in the extracted result has a non-null value. */
 export function hasAnyValue(e: ExtractedCheckin): boolean {
   return EXTRACTED_FIELDS.some((k) => e[k] !== null);
 }
