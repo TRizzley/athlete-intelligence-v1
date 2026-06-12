@@ -194,7 +194,7 @@ export function CheckinForm({
           {c ? "Editing today's check-in" : "Takes about 60 seconds"}
         </p>
         <SubmitButton pendingText="Saving…">
-          {c ? "Update check-in" : "Submit check-in"}
+          {c ? "Update check-in" : "Check in & talk to your coach"}
         </SubmitButton>
       </div>
     </form>

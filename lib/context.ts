@@ -24,7 +24,7 @@ import type {
   UserFeedback,
   AthleteMemoryNote,
 } from "./types";
-import type { CoachContext, ChatTurn, WorkoutLogBrief } from "./coach-ai";
+import type { CoachContext, ChatTurn, WorkoutLogBrief } from "./coach-types";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 

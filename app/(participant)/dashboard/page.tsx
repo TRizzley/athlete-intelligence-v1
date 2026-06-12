@@ -12,6 +12,7 @@ import { serverToday } from "@/lib/server-date";
 import { AutoCoachTrigger } from "@/components/auto-coach-trigger";
 import { PostWorkoutAckTrigger } from "@/components/post-workout-ack-trigger";
 import { ReviewReadings } from "@/app/(participant)/upload/review-readings";
+import { PushOptIn } from "@/components/push-opt-in";
 import type {
   CoachResponse,
   DailyCheckin,
@@ -34,12 +35,7 @@ function outcomeOf(p: PredictionWithOutcome): string | null {
   return row?.outcome ?? null;
 }
 
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ saved?: string }>;
-}) {
-  const { saved } = await searchParams;
+export default async function DashboardPage() {
   const user = await requireUser();
   const supabase = await createClient();
   const today = await serverToday();
@@ -52,7 +48,7 @@ export default async function DashboardPage({
     predictionsRes,
     recentRes,
   ] = await Promise.all([
-    supabase.from("users").select("full_name").eq("id", user.id).maybeSingle(),
+    supabase.from("users").select("full_name, push_token").eq("id", user.id).maybeSingle(),
     supabase
       .from("daily_checkins")
       .select("*")
@@ -123,6 +119,7 @@ export default async function DashboardPage({
     }));
 
   const name = firstName(recordRes.data?.full_name);
+  const hasPushToken = !!(recordRes.data as { push_token?: string | null } | null)?.push_token;
   const checkin = (checkinRes.data as DailyCheckin) ?? null;
   // Has today's training been logged via the post-workout check-in?
   const trained =
@@ -147,6 +144,7 @@ export default async function DashboardPage({
     <PageShell width="content">
       <AutoCoachTrigger />
       <PostWorkoutAckTrigger />
+      <PushOptIn hasPushToken={hasPushToken} />
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
           <div className="eyebrow mb-1.5">{formatDate(today)}</div>
@@ -155,17 +153,6 @@ export default async function DashboardPage({
       </div>
 
       {pendingReadings.length > 0 ? <ReviewReadings readings={pendingReadings} /> : null}
-
-      {saved === "checkin" ? (
-        <div className="mb-5 rounded-lg border border-success/30 bg-success-soft px-3.5 py-2.5 text-sm text-success">
-          Morning check-in saved. Your coach will factor it into today's decision.
-        </div>
-      ) : null}
-      {saved === "postworkout" ? (
-        <div className="mb-5 rounded-lg border border-success/30 bg-success-soft px-3.5 py-2.5 text-sm text-success">
-          Post-workout check-in saved. Your coach will send you a quick note and score today&apos;s session against its prediction.
-        </div>
-      ) : null}
 
       {/* Today's action card */}
       <div className="card mb-5">
@@ -213,38 +200,42 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      {/* Latest coaching decision */}
+      {/* Today's plan at a glance — the full conversation lives in the chat */}
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-2">
-        Your latest decision
+        Today&apos;s plan
       </h2>
       {latest ? (
-        <Link
-          href={`/coach/${latest.id}`}
-          className="card mb-6 block transition hover:border-border-strong"
-        >
+        <div className="card mb-6">
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-sm font-semibold text-foreground">
               {formatDate(latest.response_date)}
             </span>
-            <div className="flex items-center gap-2">
-              <ConfidenceBadge value={latest.confidence} />
-              {!latestRated ? (
-                <span className="pill bg-accent/15 text-accent">Needs feedback</span>
-              ) : null}
-            </div>
+            <ConfidenceBadge value={latest.confidence} />
           </div>
-          <p className="line-clamp-3 text-sm leading-relaxed text-muted">
-            {latest.recommendation || latest.what_noticed || "Tap to read your decision."}
+          <p className="line-clamp-2 text-sm leading-relaxed text-muted">
+            {latest.recommendation || latest.what_noticed || "Open the chat to read today's plan."}
           </p>
-          <div className="mt-3 text-sm font-medium text-accent">
-            {latestRated ? "Read again →" : "Read & rate →"}
+          {latest.prediction ? (
+            <p className="mt-1.5 line-clamp-1 text-sm text-muted-2">
+              <span className="font-medium text-muted">Prediction:</span> {latest.prediction}
+            </p>
+          ) : null}
+          <div className="mt-3 flex items-center gap-4">
+            <Link href="/coach/chat" className="text-sm font-medium text-accent">
+              Open the conversation →
+            </Link>
+            {!latestRated ? (
+              <Link href={`/coach/${latest.id}`} className="text-sm font-medium text-muted">
+                Rate it
+              </Link>
+            ) : null}
           </div>
-        </Link>
+        </div>
       ) : (
         <div className="card mb-6 text-center">
           <p className="text-sm text-muted">
-            Your coach is reviewing your data. Your first daily decision will appear
-            here. Keep checking in and uploading screenshots.
+            Do your morning check-in and your coach will open today&apos;s conversation
+            with a plan and a prediction.
           </p>
         </div>
       )}

@@ -1,0 +1,337 @@
+// Context serialization — turns athlete data into a compact labeled brief for
+// the AI, and applies feedback-derived calibration directives. Shared by all
+// AI coaching modules; nothing here calls Claude.
+
+import type {
+  DailyCheckin,
+  UploadedScreenshot,
+  CoachResponse,
+  PredictionWithOutcome,
+  PredictionOutcome,
+  UserFeedback,
+  Confidence,
+} from "./types";
+import type { CoachContext } from "./coach-types";
+
+// ── Shared utils ──────────────────────────────────────────────────────────────
+
+export const CONFIDENCES: Confidence[] = ["low", "medium", "high"];
+
+export function asString(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+// ── Private helpers ───────────────────────────────────────────────────────────
+
+function compact(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null || v === undefined || v === "") continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+export function checkinBrief(c: DailyCheckin): Record<string, unknown> {
+  return compact({
+    date: c.checkin_date,
+    sleep_hours: c.sleep_hours,
+    sleep_quality_1to10: c.sleep_quality,
+    recovery_score_0to100: c.recovery_score,
+    hrv_ms: c.hrv_ms,
+    resting_hr: c.resting_hr,
+    body_weight_lbs: c.body_weight_lbs,
+    calories: c.calories,
+    protein_g: c.protein_g,
+    carbs_g: c.carbs_g,
+    fat_g: c.fat_g,
+    water_oz: c.water_oz,
+    bed_time: c.bed_time,
+    wake_time: c.wake_time,
+    workout_completed: c.workout_completed,
+    workout_types: c.workout_types,
+    workout_type: c.workout_type,
+    workout_split: c.workout_split,
+    training_load: c.training_load,
+    top_set_lbs: c.top_set_lbs,
+    workout_intensity_1to10: c.workout_intensity,
+    soreness_1to10: c.soreness,
+    energy_1to10: c.energy,
+    mood_1to10: c.mood,
+    stress_1to10: c.stress,
+    motivation_1to10: c.motivation,
+    pain_injury_note: c.pain_injury_note,
+    open_comments: c.open_comments,
+  });
+}
+
+function firstOutcome(p: PredictionWithOutcome): PredictionOutcome | null {
+  const po = p.prediction_outcomes;
+  if (!po) return null;
+  return Array.isArray(po) ? po[0] ?? null : po;
+}
+
+// ── Feedback calibration ──────────────────────────────────────────────────────
+
+// Turn recent feedback into explicit, prioritized calibration directives so the
+// next decision actually adapts to what the athlete said fell short.
+//
+// Sample guard: we need at least 3 feedback entries before firing directives.
+// Below that threshold a single "somewhat" would trigger a full override, which
+// over-corrects on noise and makes the coach unstable early on.
+//
+// Weighting: "no" counts 2× vs "somewhat" so a clear miss is treated more
+// urgently than mild dissatisfaction.
+export function feedbackCalibration(feedback: UserFeedback[]): string | null {
+  const recent = feedback.slice(0, 6); // newest first
+  if (recent.length < 3) return null;
+
+  const weightedScore = (key: keyof UserFeedback) =>
+    recent.reduce((sum, f) => {
+      if (f[key] === "no") return sum + 2;
+      if (f[key] === "somewhat") return sum + 1;
+      return sum;
+    }, 0);
+  // Fire a directive when weighted score >= half the max possible
+  // (i.e., average "somewhat" or worse across the window).
+  const threshold = recent.length; // max is 2×n (all "no"), threshold at n
+  const weak = (key: keyof UserFeedback) => weightedScore(key) >= threshold;
+
+  const directives: string[] = [];
+
+  if (weak("felt_personalized")) {
+    directives.push(
+      "PERSONALIZATION IS THE #1 FIX: recent feedback says the coaching does not feel personalized. Open with something only THIS athlete would recognize — a specific number or trend from their data, a memory note, a stated preference, or a callback to a past prediction. Delete any sentence that could be sent verbatim to a different athlete.",
+    );
+  }
+  if (weak("felt_accurate")) {
+    directives.push(
+      "ACCURACY: recent feedback questions accuracy. Anchor every claim to a specific datum, and when signals conflict or data is thin, lower your confidence and name what you are unsure about rather than overstating.",
+    );
+  }
+  if (weak("was_useful")) {
+    directives.push(
+      "USEFULNESS: recent feedback says responses are not useful enough. Make the recommendation a concrete action for today with numbers (sets, intensity, calories, bedtime) — not a general principle.",
+    );
+  }
+
+  const latestComment = recent
+    .find((f) => f.free_text && f.free_text.trim())
+    ?.free_text?.trim();
+  if (latestComment) {
+    directives.push(
+      `ADDRESS THE ATHLETE'S OWN WORDS from recent feedback: "${latestComment}"`,
+    );
+  }
+
+  if (directives.length === 0) return null;
+  return (
+    "FEEDBACK CALIBRATION (act on this — it overrides habit):\n- " +
+    directives.join("\n- ")
+  );
+}
+
+// ── Context serializer ────────────────────────────────────────────────────────
+
+export function buildContextText(ctx: CoachContext, closing?: string): string {
+  const parts: string[] = [];
+
+  if (ctx.programContext) {
+    const pc = ctx.programContext;
+    const weekLabel = `Week ${pc.programWeek}`;
+    const dayLabel = `Day ${pc.dayNumber}`;
+    parts.push(
+      `Today is ${ctx.today} — the day you are planning for ${ctx.athleteName ?? "this athlete"}. ` +
+        `PROGRAM POSITION: ${dayLabel} (${weekLabel}) — ${pc.totalCheckins} check-in${pc.totalCheckins === 1 ? "" : "s"} logged since ${pc.firstCheckinDate}. ` +
+        `Let the stage of the program inform your coaching: early weeks (1–3) should emphasize habit-building and baseline-setting, not max intensity; ` +
+        `mid-program (weeks 4–8) is where you push progression; later blocks should account for accumulated fatigue and adaptation. ` +
+        `Everything below is RESULTS from days that have already happened; the most recent check-in is the latest completed day (usually yesterday/last night). ` +
+        `Read those results, then tell the athlete exactly how to train, fuel, and recover TODAY.`,
+    );
+  } else {
+    parts.push(
+      `Today is ${ctx.today} — the day you are planning for ${ctx.athleteName ?? "this athlete"}. ` +
+        `Everything below is RESULTS from days that have already happened; the most recent check-in is the latest completed day (usually yesterday/last night). ` +
+        `Read those results, then tell the athlete exactly how to train, fuel, and recover TODAY.`,
+    );
+  }
+
+  if (ctx.profile) {
+    parts.push(
+      "ATHLETE PROFILE:\n" +
+        JSON.stringify(
+          compact({
+            age: ctx.profile.age,
+            sex: ctx.profile.sex,
+            height_in: ctx.profile.height_in,
+            body_weight_lbs: ctx.profile.body_weight_lbs,
+            primary_sport: ctx.profile.primary_sport,
+            primary_goal: ctx.profile.primary_goal,
+            goal_detail: ctx.profile.goal_detail,
+            training_age: ctx.profile.training_age,
+            experience_mode: ctx.profile.experience_mode,
+            training_days_per_week: ctx.profile.training_days_per_week,
+            current_program: ctx.profile.current_program,
+            devices: ctx.profile.devices,
+            nutrition_app: ctx.profile.nutrition_app,
+            injuries: ctx.profile.injuries,
+            notes: ctx.profile.notes,
+            coaching_tone: ctx.profile.coaching_tone,
+            fatigue_tendency: ctx.profile.fatigue_tendency,
+            motivation: ctx.profile.motivation,
+            coaching_wants: ctx.profile.coaching_wants,
+            life_context: ctx.profile.life_context,
+            background: ctx.profile.background,
+          }),
+          null,
+          2,
+        ) +
+        "\nHONOR THE ATHLETE'S STATED COACHING PREFERENCES: match coaching_tone (e.g. tough_love vs supportive) in how you speak; use fatigue_tendency to anticipate whether they over-push or back off; speak to their motivation and coaching_wants; ground specifics in their background and life_context. Especially in the first week — before there is much data — these preferences are your main source of personalization.",
+    );
+  } else {
+    parts.push("ATHLETE PROFILE: (not completed yet)");
+  }
+
+  if (ctx.latestCheckin) {
+    parts.push(
+      "LATEST CHECK-IN (most recent completed-day results — plan today from this):\n" +
+        JSON.stringify(checkinBrief(ctx.latestCheckin), null, 2),
+    );
+  } else {
+    parts.push("LATEST CHECK-IN: (none logged yet)");
+  }
+
+  const history = ctx.recentCheckins.filter(
+    (c) => c.id !== ctx.latestCheckin?.id,
+  );
+  if (history.length > 0) {
+    parts.push(
+      "RECENT CHECK-IN HISTORY (most recent first):\n" +
+        JSON.stringify(history.map(checkinBrief), null, 2),
+    );
+  }
+
+  if (ctx.screenshots.length > 0) {
+    const shots = ctx.screenshots.map((s) =>
+      compact({
+        source: s.source,
+        file_name: s.file_name,
+        capture_date: s.capture_date,
+        note: s.note,
+        extracted_values: s.parsed_json ?? undefined,
+      }),
+    );
+    parts.push(
+      "UPLOADED SCREENSHOTS (wearable / nutrition app exports; extracted_values are OCR-read numbers already folded into the check-ins above):\n" +
+        JSON.stringify(shots, null, 2),
+    );
+  }
+
+  if (ctx.memoryNotes.length > 0) {
+    parts.push(
+      "COACH MEMORY NOTES (private patterns & context about this athlete):\n" +
+        ctx.memoryNotes
+          .map(
+            (n) =>
+              `- ${n.category ? `[${n.category}] ` : ""}${n.note.replace(/^\[fb:[^\]]+\]\s*/, "")}`,
+          )
+          .join("\n"),
+    );
+  }
+
+  if (ctx.previousResponses.length > 0) {
+    const recent = ctx.previousResponses.slice(0, 5).map((r) =>
+      compact({
+        date: r.response_date,
+        status: r.status,
+        what_noticed: r.what_noticed,
+        recommendation: r.recommendation,
+        prediction: r.prediction,
+        confidence: r.confidence,
+      }),
+    );
+    parts.push(
+      "PREVIOUS COACH RESPONSES (most recent first — keep continuity, avoid repeating yourself, and follow up on open threads):\n" +
+        JSON.stringify(recent, null, 2),
+    );
+  }
+
+  if (ctx.recentMessages && ctx.recentMessages.length > 0) {
+    parts.push(
+      "RECENT CHAT WITH THIS ATHLETE (most recent last — preferences they stated, context they shared, and open questions; honor what they told you and let it shape today's plan):\n" +
+        ctx.recentMessages
+          .map((m) => `${m.role === "athlete" ? "Athlete" : "Coach"}: ${m.body}`)
+          .join("\n"),
+    );
+  }
+
+  if (ctx.predictions.length > 0) {
+    const preds = ctx.predictions.slice(0, 8).map((p) => {
+      const o = firstOutcome(p);
+      return compact({
+        date: p.created_at?.slice(0, 10),
+        prediction: p.prediction_text,
+        horizon: p.horizon,
+        confidence: p.confidence,
+        outcome: o?.outcome,
+        outcome_notes: o?.notes,
+      });
+    });
+    parts.push(
+      "PAST PREDICTIONS & OUTCOMES (your track record with this athlete — learn from what came true vs missed):\n" +
+        JSON.stringify(preds, null, 2),
+    );
+  }
+
+  if (ctx.feedback.length > 0) {
+    const fb = ctx.feedback.slice(0, 8).map((f) =>
+      compact({
+        felt_accurate: f.felt_accurate,
+        felt_personalized: f.felt_personalized,
+        was_useful: f.was_useful,
+        prediction_came_true: f.prediction_came_true,
+        would_pay: f.would_pay,
+        comment: f.free_text,
+      }),
+    );
+    parts.push(
+      "ATHLETE FEEDBACK ON PAST RESPONSES (what resonates with them — lean into what they found accurate, personal, and useful):\n" +
+        JSON.stringify(fb, null, 2),
+    );
+  }
+
+  if (ctx.recentWorkouts && ctx.recentWorkouts.length > 0) {
+    const workouts = ctx.recentWorkouts.map((w) =>
+      compact({
+        date: w.session_date,
+        day: w.day_name,
+        notes: w.notes,
+        sets: w.sets.map((s) =>
+          compact({
+            exercise: s.exercise,
+            muscle: s.muscle,
+            set: s.set,
+            weight_lbs: s.weight,
+            reps: s.reps,
+          }),
+        ),
+      }),
+    );
+    parts.push(
+      "LOGGED WORKOUTS (most recent first — actual weights and reps per set; use these to judge progression, fatigue, and whether load is moving the right way):\n" +
+        JSON.stringify(workouts, null, 2),
+    );
+  }
+
+  // Calibration from feedback goes LAST so it's the freshest instruction in mind.
+  const calibration = feedbackCalibration(ctx.feedback);
+  if (calibration) parts.push(calibration);
+
+  parts.push(
+    closing ??
+      "Now draft today's decision by calling draft_coach_response. Make it specific to the data above and worthy of the 'damn, it gets me' bar.",
+  );
+
+  return parts.join("\n\n");
+}

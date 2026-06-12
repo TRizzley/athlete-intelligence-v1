@@ -8,7 +8,12 @@ import type { CoachMessage } from "@/lib/types";
 
 export const metadata = { title: "Chat with your coach — The Coach" };
 
-export default async function CoachChatPage() {
+export default async function CoachChatPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ expect?: string }>;
+}) {
+  const { expect } = await searchParams;
   const user = await requireUser();
   const supabase = await createClient();
 
@@ -44,7 +49,10 @@ export default async function CoachChatPage() {
         <UploadForm dateISO={today} />
       </details>
 
-      <Chat messages={messages} />
+      <Chat
+        messages={messages}
+        expect={expect === "brief" || expect === "review" ? expect : null}
+      />
     </PageShell>
   );
 }

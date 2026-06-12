@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { distillMemoryFromCheckin } from "@/lib/coach-ai";
+import { distillMemoryFromCheckin } from "@/lib/coach-memory";
 import type { AthleteMemoryNote } from "@/lib/types";
 
 export type FormState = { error: string | null };
@@ -156,5 +156,7 @@ export async function saveCheckin(
   revalidatePath("/checkin");
   // The coach console reads check-ins too; make sure it reflects this submission.
   revalidatePath("/admin");
-  redirect("/dashboard?saved=checkin");
+  // Chat-first flow: land the athlete in the conversation, where the coach's
+  // morning brief is generated and posted (expect=brief shows the typing state).
+  redirect("/coach/chat?expect=brief");
 }

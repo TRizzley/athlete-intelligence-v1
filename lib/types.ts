@@ -124,12 +124,15 @@ export interface UploadedScreenshot {
   applied_at: string | null;
 }
 
+export type CoachMessageKind = "chat" | "morning_brief" | "workout_review";
+
 export interface CoachMessage {
   id: string;
   user_id: string;
   role: "athlete" | "coach";
   body: string;
   ai_generated: boolean;
+  kind: CoachMessageKind;
   created_at: string;
 }
 

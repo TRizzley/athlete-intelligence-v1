@@ -3,11 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  generateCoachChatReply,
-  distillMemoryFromChat,
-  type ChatTurn,
-} from "@/lib/coach-ai";
+import { generateCoachChatReply } from "@/lib/coach-chat";
+import { distillMemoryFromChat } from "@/lib/coach-memory";
+import type { ChatTurn } from "@/lib/coach-types";
 import { buildCoachContext } from "@/lib/context";
 import { todayISO } from "@/lib/format";
 import type { CoachMessage } from "@/lib/types";
@@ -28,16 +26,17 @@ export async function sendMessage(
   if (!body) return { error: "Type a message first." };
   if (body.length > 4000) return { error: "That message is a bit long — try trimming it." };
 
-  // Rate limit: one Claude call per user per 10 seconds. Check for any message
-  // (either role) from this user in the last 10 seconds before doing anything
-  // else. This stops rapid-fire submissions from running up API costs without
-  // needing external infrastructure. Not perfectly atomic, but covers the
-  // practical case of repeated clicks or fast re-sends.
+  // Rate limit: one Claude call per user per 10 seconds. Only ATHLETE messages
+  // count — those are what trigger Claude calls. (Coach rows are excluded so a
+  // just-posted morning brief or workout review doesn't block the athlete's
+  // first reply.) Not perfectly atomic, but covers the practical case of
+  // repeated clicks or fast re-sends.
   const cooldownSince = new Date(Date.now() - 10_000).toISOString();
   const { data: recent } = await supabase
     .from("coach_messages")
     .select("id")
     .eq("user_id", user.id)
+    .eq("role", "athlete")
     .gte("created_at", cooldownSince)
     .limit(1)
     .maybeSingle();

@@ -16,7 +16,8 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { checkAdmin } from "@/lib/auth";
-import { generateCoachDraft, type ChatTurn } from "@/lib/coach-ai";
+import { generateCoachDraft } from "@/lib/coach-draft";
+import type { ChatTurn } from "@/lib/coach-types";
 import { buildCoachContext } from "@/lib/context";
 import { todayISO } from "@/lib/format";
 

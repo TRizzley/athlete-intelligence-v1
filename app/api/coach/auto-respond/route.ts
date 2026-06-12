@@ -20,12 +20,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  generateCoachDraft,
-  scorePredictionOutcome,
-  type CoachContext,
-  type ChatTurn,
-} from "@/lib/coach-ai";
+import { generateCoachDraft } from "@/lib/coach-draft";
+import { scorePredictionOutcome } from "@/lib/coach-predictions";
+import type { CoachContext, ChatTurn } from "@/lib/coach-types";
 import { buildCoachContext } from "@/lib/context";
 import { buildTrustSnapshotRow, flattenOutcomes } from "@/lib/metrics";
 import { todayISO } from "@/lib/format";
@@ -36,13 +33,6 @@ export const maxDuration = 60;
 
 function json(body: Record<string, unknown>, status = 200) {
   return NextResponse.json(body, { status });
-}
-
-// The day after a YYYY-MM-DD date (a 'tomorrow' prediction's target date).
-function nextDay(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
 }
 
 export async function POST(request: Request) {
@@ -295,20 +285,42 @@ export async function POST(request: Request) {
     return json({ ok: false, error: insertError?.message ?? "Could not save the response." }, 500);
   }
 
-  // 10. Log a tracked, scoreable prediction so the accuracy metric fills in.
+  // 10. Post the conversational morning brief into the coach chat — this is how
+  //     the athlete actually reads the decision (the structured row above feeds
+  //     metrics, history, and the dashboard snapshot). Falls back to composing
+  //     from the structured fields if the model skipped chat_message.
+  const briefBody =
+    draft.chat_message ||
+    [draft.what_noticed, draft.recommendation, draft.prediction, draft.athlete_question]
+      .filter(Boolean)
+      .join("\n\n");
+  if (briefBody) {
+    await admin.from("coach_messages").insert({
+      user_id: userId,
+      role: "coach",
+      body: briefBody,
+      ai_generated: true,
+      kind: "morning_brief",
+    });
+  }
+
+  // 11. Log a tracked, scoreable prediction so the accuracy metric fills in.
+  //     The morning prediction is about how TODAY goes; the post-workout review
+  //     scores it tonight against the completed day (with next-morning fallback
+  //     in step 6 above if no workout gets logged).
   if (draft.prediction) {
     await admin.from("predictions").insert({
       user_id: userId,
       coach_response_id: inserted.id,
       prediction_text: draft.prediction,
-      horizon: "tomorrow",
+      horizon: "today",
       confidence: draft.confidence,
-      target_date: nextDay(responseDate),
+      target_date: responseDate,
       created_by: userId,
     });
   }
 
-  // 11. Refresh today's trust snapshot so the table builds a daily time series
+  // 12. Refresh today's trust snapshot so the table builds a daily time series
   //     automatically (idempotent upsert on user_id + snapshot_date). Best-effort.
   try {
     const { count: responsesSent } = await admin

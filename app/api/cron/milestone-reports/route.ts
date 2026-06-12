@@ -16,11 +16,8 @@
 
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  generateMilestoneReport,
-  type CoachContext,
-  type MilestoneTier,
-} from "@/lib/coach-ai";
+import { generateMilestoneReport, type MilestoneTier } from "@/lib/coach-milestones";
+import type { CoachContext } from "@/lib/coach-types";
 import { buildCoachContext } from "@/lib/context";
 import type {
   AthleteProfile,

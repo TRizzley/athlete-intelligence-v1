@@ -88,5 +88,7 @@ export async function savePostWorkout(
   revalidatePath("/dashboard");
   revalidatePath("/post-workout");
   revalidatePath("/admin");
-  redirect("/dashboard?saved=postworkout");
+  // Chat-first flow: land the athlete in the conversation, where the coach's
+  // workout review is generated and posted (expect=review shows the typing state).
+  redirect("/coach/chat?expect=review");
 }

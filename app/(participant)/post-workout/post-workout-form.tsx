@@ -133,7 +133,7 @@ export function PostWorkoutForm({
           {alreadyLogged ? "Editing today's session" : "Log this once you've trained"}
         </p>
         <SubmitButton pendingText="Saving…">
-          {alreadyLogged ? "Update session" : "Log session"}
+          {alreadyLogged ? "Update session" : "Save & view coach's review"}
         </SubmitButton>
       </div>
     </form>

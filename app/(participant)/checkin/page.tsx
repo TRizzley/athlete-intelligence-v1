@@ -36,9 +36,9 @@ export default async function CheckinPage() {
         <h1 className="text-2xl font-semibold tracking-tight">How did you wake up?</h1>
         <p className="mt-1.5 text-sm text-muted">
           Do this in the morning: how you slept last night, yesterday's completed
-          fuel, and how you feel right now — anything blank is fine. Your coach reads
-          this (with your screenshots) to plan today's session. You'll log how the
-          session actually went in the Post-workout check-in.
+          fuel, and how you feel right now — anything blank is fine. When you submit,
+          your coach reads it (with your screenshots) and opens today's conversation
+          with a plan and a prediction — you can reply right there.
         </p>
       </div>
 
