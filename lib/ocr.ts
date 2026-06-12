@@ -55,7 +55,7 @@ const SOURCE_HINTS: Record<ScreenshotSource, string> = {
   apple_fitness:
     "An Apple Fitness screenshot. Move/Active calories are ENERGY BURNED — never food intake, so leave calories null. You may read heart-rate values if clearly labeled.",
   nutrition:
-    "A nutrition / food-log screenshot (MyFitnessPal, Cronometer, Lose It, etc.). Read the CONSUMED/EATEN totals for the day. TRAP: MyFitnessPal's large number is usually 'Calories Remaining' (Goal − Food + Exercise) — do NOT use it; use the 'Food' / consumed total. protein_g/carbs_g/fat_g are grams EATEN (the totals row), not goals or remaining. Ignore any per-meal breakdown unless it is the daily total.",
+    "A nutrition / food-log screenshot (MyFitnessPal, Cronometer, Lose It, etc.). Read the CONSUMED/EATEN totals for the day. CRITICAL TRAP - CALORIES: Many apps show a large bold number that is NOT food consumed. MyFitnessPal: the large centered number is 'Calories Remaining' (Goal minus Food) -- use the smaller 'Food' or 'Consumed' number instead. Cronometer: read 'Consumed' not 'Burned'. Lose It: use the direct consumed total, not goal minus remaining. If you cannot identify a clear consumed/eaten calorie number with confidence, return null -- a wrong calorie is worse than a blank. protein_g/carbs_g/fat_g are GRAMS EATEN (daily totals row only), never goals or remaining amounts. Ignore per-meal breakdowns unless they sum to a labeled daily total.",
   other:
     "A health or fitness screenshot of unknown type. Read only values whose meaning is unambiguous from a clear label.",
 };
@@ -82,7 +82,7 @@ const OCR_SYSTEM_PROMPT = [
   "- recovery_score / readiness are 0-100. hrv_ms in milliseconds. resting_hr in bpm.",
   "- body_weight_lbs in pounds (convert kg: kg * 2.20462).",
   "- calories is FOOD INTAKE in kcal (never energy burned/active calories). protein_g/carbs_g/fat_g in grams; water_oz in fluid ounces.",
-  "- sleep_quality: only fill if the app shows a clear 0-100 sleep score; rescale to 1-10 (round). Otherwise null.",
+  "- sleep_quality: only fill if the app shows a clear numeric sleep score (0-100). Return the RAW value as shown (e.g. 78, not 7.8). We rescale to 1-10 in code. If the score is not shown or is only a label, return null.",
   "",
   "Record your reading ONLY by calling record_metrics. Omit (or null) any field you cannot read with confidence.",
 ].join("\n");
@@ -90,7 +90,7 @@ const OCR_SYSTEM_PROMPT = [
 // Forced structured output — far more reliable than parsing free-text JSON.
 const FIELD_DESCRIPTIONS: Record<keyof ExtractedCheckin, string> = {
   sleep_hours: "Total time asleep, decimal hours. Null if not shown.",
-  sleep_quality: "1-10, rescaled from a 0-100 sleep score only. Else null.",
+  sleep_quality: "Raw 0-100 sleep score as shown on screen. Do not rescale. Null if not shown.",
   recovery_score: "Recovery/Readiness, 0-100. Null if not shown.",
   hrv_ms: "HRV in milliseconds. Null if only a label (no number) is shown.",
   resting_hr: "Resting heart rate in bpm. Null if not shown.",
@@ -138,7 +138,7 @@ function coerceNumber(v: unknown): number | null {
 
 // Defensive bounds so an OCR misread can't write absurd values into a check-in.
 const BOUNDS: Partial<Record<keyof ExtractedCheckin, [number, number]>> = {
-  sleep_hours: [0, 24],
+  sleep_hours: [0.5, 24],
   sleep_quality: [1, 10],
   recovery_score: [0, 100],
   hrv_ms: [1, 400],
@@ -158,6 +158,16 @@ function sanitize(raw: Record<string, unknown>): ExtractedCheckin {
     const b = BOUNDS[key];
     if (n !== null && b && (n < b[0] || n > b[1])) n = null; // out of range -> drop
     out[key] = n;
+  }
+  // sleep_quality: model returns raw 0-100; rescale to 1-10 deterministically.
+  // Anything already in [1,10] is left as-is (model may have already rescaled);
+  // values in (10,100] are divided by 10 and rounded.
+  if (out.sleep_quality !== null) {
+    if (out.sleep_quality > 10) {
+      out.sleep_quality = Math.round(out.sleep_quality / 10);
+    }
+    // Clamp to [1,10] after rescale.
+    out.sleep_quality = Math.max(1, Math.min(10, Math.round(out.sleep_quality)));
   }
   return out;
 }

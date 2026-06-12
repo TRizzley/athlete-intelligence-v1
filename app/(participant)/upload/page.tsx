@@ -4,8 +4,9 @@ import { PageShell, EmptyState } from "@/components/ui";
 import { formatDate } from "@/lib/format";
 import { serverToday } from "@/lib/server-date";
 import { SOURCE_LABELS } from "@/lib/constants";
-import { UploadForm, DeleteScreenshotButton } from "./upload-form";
+import { UploadForm, DeleteScreenshotButton, RetryOcrButton } from "./upload-form";
 import { ReviewReadings } from "./review-readings";
+import { OcrPoller } from "./ocr-poller";
 import type { UploadedScreenshot } from "@/lib/types";
 
 export const metadata = { title: "Upload screenshots — The Coach" };
@@ -66,6 +67,10 @@ export default async function UploadPage() {
 
   // Pending OCR readings awaiting the athlete's confirmation (not yet applied to
   // a check-in). Only those with at least one value read.
+  const hasProcessing = rows.some(
+    (r) => r.parse_status === "pending" || r.parse_status === "processing",
+  );
+
   const pendingReadings = rows
     .filter(
       (r) =>
@@ -85,6 +90,8 @@ export default async function UploadPage() {
 
   return (
     <PageShell width="content">
+      {hasProcessing && <OcrPoller />}
+
       <div className="mb-6">
         <div className="eyebrow mb-1.5">Screenshots</div>
         <h1 className="text-2xl font-semibold tracking-tight">
@@ -158,7 +165,10 @@ export default async function UploadPage() {
                             );
                           if (r.parse_status === "error")
                             return (
-                              <div className="mt-1 text-[11px] text-danger">Couldn&apos;t read this one</div>
+                              <div className="mt-1 flex items-center gap-1.5">
+                                <span className="text-[11px] text-danger">Couldn&apos;t read</span>
+                                <RetryOcrButton id={r.id} />
+                              </div>
                             );
                           if (vals.length > 0)
                             return (

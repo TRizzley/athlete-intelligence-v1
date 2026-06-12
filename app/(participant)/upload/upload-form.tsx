@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import {
   uploadScreenshot,
   deleteScreenshot,
+  retryOcr,
   type FormState,
 } from "./actions";
 import { Field } from "@/components/ui";
@@ -107,6 +108,24 @@ export function DeleteScreenshotButton({ id }: { id: string }) {
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0v12a1 1 0 001 1h6a1 1 0 001-1V7" />
         </svg>
+      </button>
+    </form>
+  );
+}
+
+export function RetryOcrButton({ id }: { id: string }) {
+  const [state, action] = useActionState(
+    (_prev: { error: string | null }, _fd: FormData) => retryOcr(id),
+    { error: null },
+  );
+  if (state.ok) return <span className="text-[11px] text-muted-2">Retrying…</span>;
+  return (
+    <form action={action} className="inline">
+      <button
+        type="submit"
+        className="text-[11px] text-accent underline underline-offset-2 hover:no-underline"
+      >
+        Try again
       </button>
     </form>
   );

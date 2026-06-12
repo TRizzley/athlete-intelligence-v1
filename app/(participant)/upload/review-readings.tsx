@@ -140,12 +140,14 @@ function ReadingCard({ reading }: { reading: PendingReading }) {
     <div className="card">
       <div className="mb-3 flex items-center gap-3">
         {reading.url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={reading.url}
-            alt={SOURCE_LABELS[reading.source] ?? reading.source}
-            className="h-16 w-12 shrink-0 rounded-md border border-border object-cover"
-          />
+          <a href={reading.url} target="_blank" rel="noreferrer" title="Open full image to verify numbers">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={reading.url}
+              alt={SOURCE_LABELS[reading.source] ?? reading.source}
+              className="h-16 w-12 shrink-0 rounded-md border border-border object-cover transition hover:opacity-80"
+            />
+          </a>
         ) : null}
         <div className="min-w-0">
           <div className="text-sm font-semibold text-foreground">

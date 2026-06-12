@@ -320,6 +320,60 @@ export async function dismissScreenshotReading(
   return { error: null, ok: true };
 }
 
+// Re-trigger OCR for a screenshot that previously errored. Resets parse_status
+// to "pending" and fires runOcr again — same flow as the original upload.
+export async function retryOcr(screenshotId: string): Promise<FormState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Your session expired." };
+
+  const { data: shot } = await supabase
+    .from("uploaded_screenshots")
+    .select("id, user_id, source, storage_path, file_name, note")
+    .eq("id", screenshotId)
+    .maybeSingle();
+  if (!shot || (shot as { user_id: string }).user_id !== user.id) {
+    return { error: "Screenshot not found." };
+  }
+
+  const s = shot as {
+    source: string;
+    storage_path: string;
+    file_name: string | null;
+    note: string | null;
+  };
+
+  // Download the original image from storage.
+  const { data: fileData, error: dlErr } = await supabase.storage
+    .from("screenshots")
+    .download(s.storage_path);
+  if (dlErr || !fileData) {
+    return { error: "Could not retrieve the original image." };
+  }
+
+  const bytes = await fileData.arrayBuffer();
+  const mimeType = fileData.type || "image/png";
+
+  // Reset status so the UI shows "Reading numbers..." again.
+  await supabase
+    .from("uploaded_screenshots")
+    .update({ parse_status: "pending", parse_error: null, parsed_json: null, applied_at: null })
+    .eq("id", screenshotId);
+
+  void runOcr(supabase, {
+    screenshotId,
+    source: s.source as ScreenshotSource,
+    note: s.note,
+    bytes,
+    mimeType,
+  });
+
+  revalidatePath("/upload");
+  return { error: null, ok: true, message: "Re-reading the screenshot — refresh in a moment." };
+}
+
 export async function deleteScreenshot(
   _prev: FormState,
   formData: FormData,
