@@ -126,6 +126,7 @@ export async function buildCoachContext(
       .from("uploaded_screenshots")
       .select("*")
       .eq("user_id", userId)
+      .neq("parse_status", "error")
       .order("created_at", { ascending: false })
       .limit(screenshotLimit);
     screenshots = (data as UploadedScreenshot[]) ?? [];

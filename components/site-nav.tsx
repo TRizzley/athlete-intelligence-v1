@@ -5,10 +5,10 @@ import { usePathname } from "next/navigation";
 import { SignOutButton } from "./sign-out-button";
 
 const LINKS = [
-  { href: "/dashboard", label: "Today" },
   { href: "/checkin", label: "Check-in" },
-  { href: "/post-workout", label: "Post-workout" },
+  { href: "/dashboard", label: "Today" },
   { href: "/workout", label: "Workout" },
+  { href: "/post-workout", label: "Post-workout" },
   { href: "/coach", label: "Coach" },
 ];
 

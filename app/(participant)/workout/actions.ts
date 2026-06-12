@@ -541,6 +541,23 @@ export async function addExerciseToSession(
   revalidatePath("/workout");
 }
 
+// Delete a completed / historical session from the history list.
+export async function deleteSession(sessionId: string): Promise<{ ok: boolean; error?: string }> {
+  const { supabase, user } = await uid();
+  if (!user) return { ok: false, error: "Your session expired." };
+  if (!sessionId) return { ok: false, error: "Missing session id." };
+
+  const { error } = await supabase
+    .from("workout_sessions")
+    .delete()
+    .eq("id", sessionId)
+    .eq("user_id", user.id);
+
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/workout");
+  return { ok: true };
+}
+
 // Remove today's session so the athlete can pick a different day.
 export async function clearSession(
   _prev: FormState,

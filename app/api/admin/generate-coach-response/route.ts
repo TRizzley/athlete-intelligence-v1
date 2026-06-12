@@ -14,8 +14,8 @@
 // ----------------------------------------------------------------------------
 
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { checkAdmin } from "@/lib/auth";
 import { generateCoachDraft, type ChatTurn } from "@/lib/coach-ai";
 import { buildCoachContext } from "@/lib/context";
 import { todayISO } from "@/lib/format";
@@ -30,20 +30,10 @@ function bad(error: string, status = 400) {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-
   // 1. Authenticate + authorize: must be a signed-in admin.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return bad("Not signed in.", 401);
-
-  const { data: me } = await supabase
-    .from("users")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle();
-  if (me?.role !== "admin") return bad("Admins only.", 403);
+  //    checkAdmin() checks JWT app_metadata first; falls back to users table.
+  const user = await checkAdmin();
+  if (!user) return bad("Not signed in or not an admin.", 401);
 
   // Service-role client for all athlete data access — bypasses RLS so a gap
   // in an admin policy can never silently return partial context to Claude.

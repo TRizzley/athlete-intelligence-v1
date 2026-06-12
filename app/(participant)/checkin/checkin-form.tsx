@@ -5,16 +5,20 @@ import { saveCheckin, type FormState } from "./actions";
 import { Field } from "@/components/ui";
 import { Slider, SubmitButton } from "@/components/interactive";
 import { todayISO } from "@/lib/format";
-import type { DailyCheckin } from "@/lib/types";
+import type { DailyCheckin, WorkoutDay } from "@/lib/types";
 
 const initial: FormState = { error: null };
+
+type DayLite = Pick<WorkoutDay, "id" | "name" | "label">;
 
 export function CheckinForm({
   existing,
   dateISO,
+  workoutDays,
 }: {
   existing: DailyCheckin | null;
   dateISO: string;
+  workoutDays: DayLite[];
 }) {
   const [state, action] = useActionState(saveCheckin, initial);
   const c = existing;
@@ -111,6 +115,44 @@ export function CheckinForm({
             <input id="water_oz" name="water_oz" type="number" inputMode="decimal" step="any" min="0" defaultValue={c?.water_oz ?? ""} className="input" />
           </Field>
         </div>
+      </section>
+
+      {/* Planned workout */}
+      <section className="card space-y-4">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
+          Today&apos;s plan
+        </h3>
+        <p className="-mt-1 text-xs text-muted-2">
+          What are you planning to train today? This is just for your coach&apos;s context — you&apos;re not locked in.
+        </p>
+        <Field label="Planned workout" htmlFor="workout_split">
+          {workoutDays.length > 0 ? (
+            <select
+              id="workout_split"
+              name="workout_split"
+              defaultValue={existing?.workout_split ?? ""}
+              className="input"
+            >
+              <option value="">— Not sure yet —</option>
+              {workoutDays.map((d) => (
+                <option key={d.id} value={d.name}>
+                  {d.name}{d.label ? ` — ${d.label}` : ""}
+                </option>
+              ))}
+              <option value="Rest">Rest day</option>
+              <option value="Other">Other / freestyle</option>
+            </select>
+          ) : (
+            <input
+              id="workout_split"
+              name="workout_split"
+              type="text"
+              defaultValue={existing?.workout_split ?? ""}
+              className="input"
+              placeholder="e.g. Upper body, Legs, Rest day…"
+            />
+          )}
+        </Field>
       </section>
 
       {/* How you feel */}

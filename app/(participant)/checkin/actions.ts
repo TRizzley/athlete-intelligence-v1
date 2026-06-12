@@ -95,6 +95,7 @@ export async function saveCheckin(
     motivation: intOrNull(formData, "motivation"),
     pain_injury_note: str(formData, "pain_injury_note"),
     open_comments: str(formData, "open_comments"),
+    workout_split: str(formData, "workout_split"),
   };
 
   const { error } = await supabase

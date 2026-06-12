@@ -4,7 +4,7 @@ import { PageShell } from "@/components/ui";
 import { serverToday } from "@/lib/server-date";
 import { CheckinForm } from "./checkin-form";
 import { UploadForm } from "@/app/(participant)/upload/upload-form";
-import type { DailyCheckin } from "@/lib/types";
+import type { DailyCheckin, WorkoutDay } from "@/lib/types";
 
 export const metadata = { title: "Daily check-in — The Coach" };
 
@@ -13,12 +13,21 @@ export default async function CheckinPage() {
   const supabase = await createClient();
   const date = await serverToday();
 
-  const { data: existing } = await supabase
-    .from("daily_checkins")
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("checkin_date", date)
-    .maybeSingle();
+  const [{ data: existing }, { data: daysData }] = await Promise.all([
+    supabase
+      .from("daily_checkins")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("checkin_date", date)
+      .maybeSingle(),
+    supabase
+      .from("workout_days")
+      .select("id, name, label")
+      .eq("user_id", user.id)
+      .order("position", { ascending: true }),
+  ]);
+
+  const days = (daysData as Pick<WorkoutDay, "id" | "name" | "label">[]) ?? [];
 
   return (
     <PageShell width="content">
@@ -33,7 +42,7 @@ export default async function CheckinPage() {
         </p>
       </div>
 
-      <CheckinForm existing={(existing as DailyCheckin) ?? null} dateISO={date} />
+      <CheckinForm existing={(existing as DailyCheckin) ?? null} dateISO={date} workoutDays={days} />
 
       <details className="mt-8 rounded-2xl border border-border bg-surface/40 p-4">
         <summary className="cursor-pointer text-sm font-medium text-foreground">

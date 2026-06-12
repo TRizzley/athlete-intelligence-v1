@@ -128,75 +128,83 @@ export async function POST(request: Request) {
   //    has a check-in and hasn't been graded yet. Newly scored outcomes are merged
   //    in-memory so they also inform today's decision below.
   //
-  //    Broadened scoring window: the 8-check-in window may not cover older target
-  //    dates. For any unscored prediction whose target_date falls outside our
-  //    in-memory map, we fetch that specific check-in directly so no prediction
-  //    goes unscored due to window size.
+  //    All scoring runs in parallel (two phases) to avoid blocking the draft:
+  //    Phase A -- fetch any missing check-ins concurrently (deduplicated by date).
+  //    Phase B -- fire all scorePredictionOutcome (Claude) calls concurrently.
   const predsAll = baseCtx.predictions;
   const checkins = baseCtx.recentCheckins;
   const checkinByDate = new Map(checkins.map((c) => [c.checkin_date, c]));
 
-  for (const p of predsAll) {
+  const toScore = predsAll.filter((p) => {
     const po = p.prediction_outcomes;
     const alreadyScored = Array.isArray(po) ? po.length > 0 : !!po;
-    if (alreadyScored || !p.target_date) continue;
+    return !alreadyScored && !!p.target_date;
+  });
 
-    // Resolve the check-in for the target date — from in-memory map first,
-    // then fall back to a targeted DB fetch for older predictions.
-    let actual = checkinByDate.get(p.target_date) ?? null;
-    if (!actual) {
-      const { data: fetchedRow } = await admin
+  // Phase A: fetch missing check-ins in parallel, deduplicated by date.
+  const missingDates = [
+    ...new Set(toScore.filter((p) => !checkinByDate.has(p.target_date!)).map((p) => p.target_date!)),
+  ];
+  await Promise.allSettled(
+    missingDates.map(async (date) => {
+      const { data } = await admin
         .from("daily_checkins")
         .select("*")
         .eq("user_id", userId)
-        .eq("checkin_date", p.target_date)
+        .eq("checkin_date", date)
         .maybeSingle();
-      actual = (fetchedRow as DailyCheckin) ?? null;
-      if (actual) checkinByDate.set(p.target_date, actual); // cache for reuse
-    }
-    if (!actual) continue; // genuinely no check-in for this target date yet
+      if (data) checkinByDate.set(date, data as DailyCheckin);
+    }),
+  );
 
-    // Baseline = the most recent check-in strictly before the target day.
-    const prior =
-      checkins
-        .filter((c) => c.checkin_date < p.target_date!)
-        .sort((a, b) => (a.checkin_date < b.checkin_date ? 1 : -1))[0] ?? null;
+  // Phase B: score all eligible predictions concurrently.
+  await Promise.allSettled(
+    toScore.map(async (p) => {
+      const actual = checkinByDate.get(p.target_date!) ?? null;
+      if (!actual) return; // no check-in for this target date yet
 
-    try {
-      const score = await scorePredictionOutcome(
-        p.prediction_text,
-        p.target_date,
-        actual,
-        prior,
-      );
-      const { error: outErr } = await admin
-        .from("prediction_outcomes")
-        .upsert(
-          {
-            prediction_id: p.id,
-            outcome: score.outcome,
-            notes: score.notes || null,
-            recorded_by: userId,
-          },
-          { onConflict: "prediction_id", ignoreDuplicates: true },
+      const prior =
+        checkins
+          .filter((c) => c.checkin_date < p.target_date!)
+          .sort((a, b) => (a.checkin_date < b.checkin_date ? 1 : -1))[0] ?? null;
+
+      try {
+        const score = await scorePredictionOutcome(
+          p.prediction_text,
+          p.target_date!,
+          actual,
+          prior,
         );
-      if (!outErr) {
-        // Reflect the new outcome in the context used for today's draft.
-        p.prediction_outcomes = [
-          {
-            id: "pending",
-            prediction_id: p.id,
-            outcome: score.outcome,
-            notes: score.notes || null,
-            recorded_by: userId,
-            recorded_at: new Date().toISOString(),
-          },
-        ];
+        const { error: outErr } = await admin
+          .from("prediction_outcomes")
+          .upsert(
+            {
+              prediction_id: p.id,
+              outcome: score.outcome,
+              notes: score.notes || null,
+              recorded_by: userId,
+            },
+            { onConflict: "prediction_id", ignoreDuplicates: true },
+          );
+        if (!outErr) {
+          // Reflect the new outcome in the context used for today's draft.
+          p.prediction_outcomes = [
+            {
+              id: "pending",
+              prediction_id: p.id,
+              outcome: score.outcome,
+              notes: score.notes || null,
+              recorded_by: userId,
+              recorded_at: new Date().toISOString(),
+            },
+          ];
+        }
+      } catch (err) {
+        console.warn("[auto-respond] prediction scoring failed for", p.id, err);
+        /* best-effort; leave unscored so it retries on the next run */
       }
-    } catch {
-      /* best-effort; leave unscored so it retries on the next run */
-    }
-  }
+    }),
+  );
 
   // 7. Compute program context — where the athlete is in their journey.
   //    Uses the earliest check-in in the 8-day window as a proxy; if they've
