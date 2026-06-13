@@ -24,6 +24,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateWorkoutReview, type MorningPredictionResult } from "@/lib/coach-workout";
 import { scorePredictionOutcome } from "@/lib/coach-predictions";
+import { friendlyCoachError } from "@/lib/coach-errors";
 import type { ChatTurn } from "@/lib/coach-types";
 import { buildCoachContext } from "@/lib/context";
 import { todayISO } from "@/lib/format";
@@ -154,7 +155,7 @@ export async function POST(request: Request) {
   try {
     review = await generateWorkoutReview({ ...ctx, recentMessages }, morningResult);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not generate the review.";
+    const message = friendlyCoachError(err, "post-workout");
     return json({ ok: false, error: message }, 502);
   }
 
