@@ -41,6 +41,23 @@ export interface ChatTurn {
   body: string;
 }
 
+export interface WorkoutExerciseBrief {
+  id: string;
+  name: string;
+  muscle_group: string | null;
+  target_sets: number | null;
+  target_reps: string | null;
+  position: number;
+}
+
+export interface WorkoutDayBrief {
+  id: string;
+  name: string;
+  label: string | null;
+  position: number;
+  exercises: WorkoutExerciseBrief[];
+}
+
 // Everything the AI is fed. Mirrors what the admin review page already loads.
 export interface CoachContext {
   athleteName: string | null;
@@ -56,4 +73,5 @@ export interface CoachContext {
   recentWorkouts?: WorkoutLogBrief[]; // logged sessions w/ per-set weight+reps
   recentMessages?: ChatTurn[]; // recent coach<->athlete chat (oldest first)
   programContext?: ProgramContext; // absent for brand-new athletes
+  workoutDays?: WorkoutDayBrief[]; // saved program structure (days + exercises with IDs)
 }

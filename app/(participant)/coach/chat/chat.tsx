@@ -7,6 +7,45 @@ import { SubmitButton } from "@/components/interactive";
 import { relativeTime, todayISO } from "@/lib/format";
 import type { CoachMessage } from "@/lib/types";
 
+// ---------------------------------------------------------------------------
+// Workout proposal parsing
+// ---------------------------------------------------------------------------
+
+type WorkoutProposal = Record<string, unknown> & { action: string };
+
+function extractProposal(body: string): { text: string; proposal: WorkoutProposal | null } {
+  const match = body.match(/<workout_proposal>([\s\S]*?)<\/workout_proposal>/);
+  if (!match) return { text: body, proposal: null };
+  try {
+    const proposal = JSON.parse(match[1].trim()) as WorkoutProposal;
+    const text = body.replace(/<workout_proposal>[\s\S]*?<\/workout_proposal>/, "").trim();
+    return { text, proposal };
+  } catch {
+    return { text: body, proposal: null };
+  }
+}
+
+function proposalLabel(p: WorkoutProposal): string {
+  switch (p.action) {
+    case "add_exercise": {
+      const ex = p.exercise as { name?: string } | undefined;
+      return `Add ${ex?.name ?? "exercise"} to ${p.day_name ?? "day"}`;
+    }
+    case "remove_exercise":
+      return `Remove ${p.exercise_name ?? "exercise"} from ${p.day_name ?? "day"}`;
+    case "update_exercise":
+      return `Update exercise in ${p.day_name ?? "day"}`;
+    case "create_day":
+      return `Create workout day: ${p.name ?? ""}`;
+    case "create_program": {
+      const days = p.days as unknown[];
+      return `Import ${days?.length ?? 0}-day program`;
+    }
+    default:
+      return "Apply workout change";
+  }
+}
+
 const initial: FormState = { error: null };
 
 // What the athlete was just redirected here for. Drives the "coach is typing"
@@ -29,6 +68,9 @@ export function Chat({
   // the athlete's real day (set after mount to avoid a hydration mismatch).
   const [localToday, setLocalToday] = useState("");
   useEffect(() => setLocalToday(todayISO()), []);
+
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // ---------------------------------------------------------------------------
   // Chat-first check-ins: when the athlete lands here right after a check-in
@@ -143,18 +185,48 @@ export function Chat({
       <form
         action={action}
         className="sticky bottom-0 mt-4 -mx-4 border-t border-border bg-background/90 px-4 py-3 backdrop-blur"
+        onSubmit={() => setPdfFile(null)}
       >
         <input type="hidden" name="client_date" value={localToday} />
+        {/* Hidden file input for PDF uploads */}
+        <input
+          ref={fileRef}
+          type="file"
+          name="pdf"
+          accept=".pdf"
+          className="hidden"
+          onChange={(e) => setPdfFile(e.target.files?.[0] ?? null)}
+        />
+        {pdfFile ? (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm">
+            <span className="flex-1 truncate text-muted">{pdfFile.name}</span>
+            <button
+              type="button"
+              onClick={() => { setPdfFile(null); if (fileRef.current) fileRef.current.value = ""; }}
+              className="text-muted-2 hover:text-foreground"
+            >
+              ✕
+            </button>
+          </div>
+        ) : null}
         <div className="flex items-end gap-2">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-lg border border-border text-muted hover:text-foreground"
+            title="Attach workout PDF"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
           <textarea
-            // Remount (clear) once new messages land after a successful send.
             key={messages.length}
             ref={taRef}
             name="body"
-            required
             rows={1}
             onKeyDown={onKeyDown}
-            placeholder="Message your coach…"
+            placeholder={pdfFile ? "Add a note about the PDF (optional)…" : "Message your coach…"}
             className="input max-h-40 min-h-[44px] flex-1 resize-y"
           />
           <SubmitButton pendingText="Sending…" variant="accent">
@@ -190,9 +262,68 @@ const KIND_LABELS: Record<string, string> = {
   workout_review: "Workout review",
 };
 
+function WorkoutProposalCard({ proposal }: { proposal: WorkoutProposal }) {
+  const [status, setStatus] = useState<"idle" | "applying" | "done" | "error">("idle");
+  const [resultMsg, setResultMsg] = useState("");
+
+  async function apply() {
+    setStatus("applying");
+    try {
+      const res = await fetch("/api/coach/workout/apply", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(proposal),
+      });
+      const json = await res.json() as { ok?: boolean; message?: string; error?: string };
+      if (json.ok) {
+        setStatus("done");
+        setResultMsg(json.message ?? "Done!");
+      } else {
+        setStatus("error");
+        setResultMsg(json.error ?? "Something went wrong.");
+      }
+    } catch {
+      setStatus("error");
+      setResultMsg("Could not apply change.");
+    }
+  }
+
+  if (status === "done") {
+    return (
+      <div className="mt-2 rounded-xl border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-600 dark:text-green-400">
+        ✓ {resultMsg}
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div className="mt-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+        {resultMsg}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-xl border border-accent/30 bg-accent/5 px-3 py-2.5">
+      <p className="text-xs font-semibold uppercase tracking-wide text-accent">Workout change</p>
+      <p className="mt-0.5 text-sm text-foreground">{proposalLabel(proposal)}</p>
+      <button
+        onClick={apply}
+        disabled={status === "applying"}
+        className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+      >
+        {status === "applying" ? "Applying…" : "Confirm"}
+      </button>
+    </div>
+  );
+}
+
 function Bubble({ message }: { message: CoachMessage }) {
   const mine = message.role === "athlete";
   const kindLabel = !mine ? KIND_LABELS[message.kind] : undefined;
+  const { text, proposal } = mine ? { text: message.body, proposal: null } : extractProposal(message.body);
+
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
       <div className={`max-w-[85%] ${mine ? "items-end" : "items-start"}`}>
@@ -210,8 +341,9 @@ function Bubble({ message }: { message: CoachMessage }) {
               {kindLabel}
             </div>
           ) : null}
-          {message.body}
+          {text}
         </div>
+        {proposal ? <WorkoutProposalCard proposal={proposal} /> : null}
         <div className={`mt-1 text-[11px] text-muted-2 ${mine ? "text-right" : "text-left"}`}>
           {mine ? "You" : "Coach"} · {relativeTime(message.created_at)}
         </div>

@@ -24,7 +24,7 @@ import type {
   UserFeedback,
   AthleteMemoryNote,
 } from "./types";
-import type { CoachContext, ChatTurn, WorkoutLogBrief } from "./coach-types";
+import type { CoachContext, ChatTurn, WorkoutLogBrief, WorkoutDayBrief, WorkoutExerciseBrief } from "./coach-types";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -198,6 +198,41 @@ export async function buildCoachContext(
     ? (checkins.find((c) => c.checkin_date === latestCheckinDate) ?? checkins[0] ?? null)
     : (checkins[0] ?? null);
 
+  // Workout program: saved days + exercises (for coach editing proposals).
+  let workoutDays: WorkoutDayBrief[] = [];
+  const { data: dayRows } = await admin
+    .from("workout_days")
+    .select("id, name, label, position")
+    .eq("user_id", userId)
+    .order("position", { ascending: true });
+
+  if (dayRows && dayRows.length > 0) {
+    const { data: exRows } = await admin
+      .from("workout_exercises")
+      .select("id, workout_day_id, name, muscle_group, target_sets, target_reps, position")
+      .in("workout_day_id", dayRows.map((d: { id: string }) => d.id))
+      .order("position", { ascending: true });
+
+    const exByDay = new Map<string, WorkoutExerciseBrief[]>();
+    (exRows ?? []).forEach((r: {
+      id: string; workout_day_id: string; name: string;
+      muscle_group: string | null; target_sets: number | null;
+      target_reps: string | null; position: number;
+    }) => {
+      const arr = exByDay.get(r.workout_day_id) ?? [];
+      arr.push({ id: r.id, name: r.name, muscle_group: r.muscle_group, target_sets: r.target_sets, target_reps: r.target_reps, position: r.position });
+      exByDay.set(r.workout_day_id, arr);
+    });
+
+    workoutDays = dayRows.map((d: { id: string; name: string; label: string | null; position: number }) => ({
+      id: d.id,
+      name: d.name,
+      label: d.label,
+      position: d.position,
+      exercises: exByDay.get(d.id) ?? [],
+    }));
+  }
+
   return {
     athleteName: userRec?.full_name || profile?.full_name || userRec?.email || null,
     today,
@@ -211,5 +246,6 @@ export async function buildCoachContext(
     feedback: (feedbackRes.data as UserFeedback[]) ?? [],
     recentWorkouts,
     recentMessages,
+    workoutDays,
   };
 }

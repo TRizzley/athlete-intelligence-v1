@@ -324,6 +324,25 @@ export function buildContextText(ctx: CoachContext, closing?: string): string {
     );
   }
 
+  if (ctx.workoutDays && ctx.workoutDays.length > 0) {
+    const days = ctx.workoutDays.map((d) => ({
+      id: d.id,
+      name: d.name,
+      label: d.label,
+      exercises: d.exercises.map((e) => ({
+        id: e.id,
+        name: e.name,
+        muscle_group: e.muscle_group,
+        sets: e.target_sets,
+        reps: e.target_reps,
+      })),
+    }));
+    parts.push(
+      "SAVED WORKOUT PROGRAM (days and exercises with their IDs — use these IDs in workout proposals):\n" +
+        JSON.stringify(days, null, 2),
+    );
+  }
+
   // Calibration from feedback goes LAST so it's the freshest instruction in mind.
   const calibration = feedbackCalibration(ctx.feedback);
   if (calibration) parts.push(calibration);

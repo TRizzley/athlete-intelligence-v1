@@ -24,8 +24,18 @@ export async function sendMessage(
   if (!user) return { error: "Your session expired. Please sign in again." };
 
   const body = String(formData.get("body") ?? "").trim();
-  if (!body) return { error: "Type a message first." };
+  const pdfFile = formData.get("pdf") as File | null;
+
+  if (!body && !pdfFile) return { error: "Type a message or attach a file." };
   if (body.length > 4000) return { error: "That message is a bit long — try trimming it." };
+
+  // Validate PDF if present.
+  let pdfBase64: string | undefined;
+  if (pdfFile) {
+    if (pdfFile.size > 10 * 1024 * 1024) return { error: "PDF must be under 10 MB." };
+    const buf = await pdfFile.arrayBuffer();
+    pdfBase64 = Buffer.from(buf).toString("base64");
+  }
 
   // Rate limit: one Claude call per user per 10 seconds. Only ATHLETE messages
   // count — those are what trigger Claude calls. (Coach rows are excluded so a
@@ -54,10 +64,11 @@ export async function sendMessage(
     : todayISO();
 
   // 1. Save the athlete's message (RLS allows posting your own 'athlete' rows).
+  const messageBody = body || (pdfFile ? `[Attached PDF: ${pdfFile.name}]` : "");
   const { error: insertErr } = await supabase.from("coach_messages").insert({
     user_id: user.id,
     role: "athlete",
-    body,
+    body: messageBody,
   });
   if (insertErr) return { error: `Could not send: ${insertErr.message}` };
 
@@ -89,7 +100,7 @@ export async function sendMessage(
     .map((m) => ({ role: m.role, body: m.body }));
 
   try {
-    const reply = await generateCoachChatReply(ctx, history);
+    const reply = await generateCoachChatReply(ctx, history, pdfBase64);
     // Writing a 'coach' row requires the service-role client (RLS forbids the
     // athlete from inserting it). Check the result — if this insert fails (e.g.
     // SUPABASE_SERVICE_ROLE_KEY missing in the deploy), surface it instead of
