@@ -29,6 +29,14 @@ export default async function CheckinPage() {
 
   const days = (daysData as Pick<WorkoutDay, "id" | "name" | "label">[]) ?? [];
 
+  // True when WHOOP has synced biometrics for today but the user hasn't
+  // manually filled in subjective fields yet (energy, mood, etc.).
+  const existingCheckin = (existing as DailyCheckin) ?? null;
+  const whoopPrefilled =
+    existingCheckin != null &&
+    existingCheckin.recovery_score != null &&
+    existingCheckin.energy == null;
+
   return (
     <PageShell width="content">
       <div className="mb-6">
@@ -42,7 +50,7 @@ export default async function CheckinPage() {
         </p>
       </div>
 
-      <CheckinForm existing={(existing as DailyCheckin) ?? null} dateISO={date} workoutDays={days} />
+      <CheckinForm existing={existingCheckin} dateISO={date} workoutDays={days} whoopPrefilled={whoopPrefilled} />
 
       <details className="mt-8 rounded-2xl border border-border bg-surface/40 p-4">
         <summary className="cursor-pointer text-sm font-medium text-foreground">

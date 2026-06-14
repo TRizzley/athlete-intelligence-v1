@@ -22,12 +22,12 @@ export default async function DashboardPage() {
   const supabase = await createClient();
   const today = await serverToday();
 
-  const [recordRes, checkinRes, morningBriefRes, workoutReviewRes] =
+  const [recordRes, checkinRes, morningBriefRes, workoutReviewRes, whoopTokenRes] =
     await Promise.all([
       supabase.from("users").select("full_name, push_token").eq("id", user.id).maybeSingle(),
       supabase
         .from("daily_checkins")
-        .select("workout_completed")
+        .select("workout_completed, recovery_score, hrv_ms, resting_hr, sleep_hours, sleep_quality")
         .eq("user_id", user.id)
         .eq("checkin_date", today)
         .maybeSingle(),
@@ -49,15 +49,45 @@ export default async function DashboardPage() {
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      // WHOOP token status
+      supabase
+        .from("whoop_tokens")
+        .select("expires_at")
+        .eq("user_id", user.id)
+        .maybeSingle(),
     ]);
 
   const name = firstName(recordRes.data?.full_name);
   const hasPushToken = !!(recordRes.data as { push_token?: string | null } | null)?.push_token;
-  const checkin = (checkinRes.data as Partial<DailyCheckin>) ?? null;
+  const checkin = (checkinRes.data as Partial<DailyCheckin> & {
+    recovery_score?: number | null;
+    hrv_ms?: number | null;
+    resting_hr?: number | null;
+    sleep_hours?: number | null;
+    sleep_quality?: number | null;
+  }) ?? null;
   const trained =
     checkin?.workout_completed !== null && checkin?.workout_completed !== undefined;
+
+  const whoopBiometrics =
+    checkin && (checkin.recovery_score != null || checkin.hrv_ms != null)
+      ? {
+          recovery_score: checkin.recovery_score ?? null,
+          hrv_ms: checkin.hrv_ms ?? null,
+          resting_hr: checkin.resting_hr ?? null,
+          sleep_hours: checkin.sleep_hours ?? null,
+          sleep_quality: checkin.sleep_quality ?? null,
+        }
+      : null;
   const morningBrief = morningBriefRes.data ?? null;
   const workoutReview = workoutReviewRes.data ?? null;
+
+  // WHOOP connection status
+  const whoopToken = whoopTokenRes.data as { expires_at: string } | null;
+  const whoopConnected = !!whoopToken;
+  const whoopExpired = whoopToken
+    ? new Date(whoopToken.expires_at) < new Date()
+    : false;
 
   // Brief summary: first 2 sentences of the coach message
   function excerpt(body: string): string {
@@ -70,7 +100,6 @@ export default async function DashboardPage() {
       <AutoCoachTrigger />
       <PostWorkoutAckTrigger />
       <PushOptIn hasPushToken={hasPushToken} />
-
       {/* Header */}
       <div className="mb-8">
         <div className="eyebrow mb-1.5">{formatDate(today)}</div>
@@ -88,8 +117,65 @@ export default async function DashboardPage() {
         >
           {trained ? "Edit workout" : "Log workout"}
         </Link>
-        <WhoopSyncButton />
+        {whoopConnected && !whoopExpired && <WhoopSyncButton />}
       </div>
+
+      {/* WHOOP reconnect banner */}
+      {whoopExpired && (
+        <div className="card mb-4 flex items-center justify-between gap-4">
+          <p className="text-sm text-muted">
+            WHOOP disconnected — reconnect to keep syncing your recovery data.
+          </p>
+          <a href="/api/whoop/connect" className="btn-primary text-sm shrink-0">
+            Reconnect
+          </a>
+        </div>
+      )}
+
+      {/* WHOOP biometrics card */}
+      {whoopConnected && !whoopExpired && whoopBiometrics && (
+        <div className="card mb-4">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-2">
+            WHOOP · Today
+          </p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {whoopBiometrics.recovery_score != null && (
+              <div>
+                <p className="text-xs text-muted">Recovery</p>
+                <p
+                  className={`text-xl font-semibold ${
+                    whoopBiometrics.recovery_score >= 67
+                      ? "text-green-500"
+                      : whoopBiometrics.recovery_score >= 34
+                        ? "text-yellow-500"
+                        : "text-red-500"
+                  }`}
+                >
+                  {whoopBiometrics.recovery_score}%
+                </p>
+              </div>
+            )}
+            {whoopBiometrics.hrv_ms != null && (
+              <div>
+                <p className="text-xs text-muted">HRV</p>
+                <p className="text-xl font-semibold">{whoopBiometrics.hrv_ms}<span className="text-sm font-normal text-muted"> ms</span></p>
+              </div>
+            )}
+            {whoopBiometrics.resting_hr != null && (
+              <div>
+                <p className="text-xs text-muted">Resting HR</p>
+                <p className="text-xl font-semibold">{whoopBiometrics.resting_hr}<span className="text-sm font-normal text-muted"> bpm</span></p>
+              </div>
+            )}
+            {whoopBiometrics.sleep_hours != null && (
+              <div>
+                <p className="text-xs text-muted">Sleep</p>
+                <p className="text-xl font-semibold">{whoopBiometrics.sleep_hours}<span className="text-sm font-normal text-muted"> hrs</span></p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Morning brief */}
       {morningBrief ? (

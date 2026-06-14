@@ -78,7 +78,7 @@ const DRAFT_TOOL: Anthropic.Tool = {
       data_used: {
         type: "string",
         description:
-          "Data used: a short, plain-language list of the signals this decision is based on (e.g. HRV trend, sleep, soreness, the WHOOP screenshot, their note about work stress).",
+          "Data used: a short, plain-language list of the signals this decision is based on (e.g. WHOOP HRV trend, recovery score, sleep hours, soreness, their note about work stress).",
       },
       athlete_question: {
         type: "string",

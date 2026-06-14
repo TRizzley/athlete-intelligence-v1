@@ -15,10 +15,12 @@ export function CheckinForm({
   existing,
   dateISO,
   workoutDays,
+  whoopPrefilled = false,
 }: {
   existing: DailyCheckin | null;
   dateISO: string;
   workoutDays: DayLite[];
+  whoopPrefilled?: boolean;
 }) {
   const [state, action] = useActionState(saveCheckin, initial);
   const c = existing;
@@ -57,9 +59,16 @@ export function CheckinForm({
 
       {/* This morning's recovery & sleep */}
       <section className="card space-y-4">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
-          This morning's recovery &amp; sleep
-        </h3>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
+            This morning's recovery &amp; sleep
+          </h3>
+          {whoopPrefilled && (
+            <span className="shrink-0 rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-medium text-accent">
+              Synced from WHOOP
+            </span>
+          )}
+        </div>
         <p className="-mt-1 text-xs text-muted-2">
           The scores you woke up with today — last night's sleep and the recovery /
           HRV / resting HR your wearable gave you this morning. Not yesterday's.

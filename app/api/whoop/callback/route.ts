@@ -13,7 +13,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { exchangeWhoopCode, fetchWhoopProfile } from "@/lib/whoop";
+import { exchangeWhoopCode, fetchWhoopProfile, fetchWhoopRecoveries, fetchWhoopSleeps } from "@/lib/whoop";
 import { cookies } from "next/headers";
 
 function appUrl(path: string): string {
@@ -94,6 +94,66 @@ export async function GET(request: Request) {
   if (upsertErr) {
     console.error("whoop_tokens upsert failed", upsertErr);
     return NextResponse.redirect(appUrl("/dashboard?whoop=db_error"));
+  }
+
+  // Trigger a 30-day historical sync immediately while the token is fresh.
+  try {
+    const SYNC_DAYS = 30;
+    const start = new Date();
+    start.setDate(start.getDate() - SYNC_DAYS);
+    start.setHours(0, 0, 0, 0);
+    const startISO = start.toISOString();
+
+    function msToHours(ms: number): number {
+      return Math.round((ms / 3_600_000) * 10) / 10;
+    }
+
+    const [recoveries, sleeps] = await Promise.all([
+      fetchWhoopRecoveries(tokenData.access_token, startISO),
+      fetchWhoopSleeps(tokenData.access_token, startISO),
+    ]);
+
+    const sleepByDate = new Map<string, { hours: number; efficiency: number | null }>();
+    for (const sleep of sleeps) {
+      if (sleep.nap || sleep.score_state !== "SCORED" || !sleep.score) continue;
+      const date = sleep.end.slice(0, 10);
+      const totalSleepMs =
+        sleep.score.stage_summary.total_light_sleep_time_milli +
+        sleep.score.stage_summary.total_slow_wave_sleep_time_milli +
+        sleep.score.stage_summary.total_rem_sleep_time_milli;
+      sleepByDate.set(date, {
+        hours: msToHours(totalSleepMs),
+        efficiency: sleep.score.sleep_efficiency_percentage ?? null,
+      });
+    }
+
+    for (const rec of recoveries) {
+      if (rec.score_state !== "SCORED" || !rec.score) continue;
+      const date = rec.created_at.slice(0, 10);
+      const sleep = sleepByDate.get(date);
+
+      const update: Record<string, unknown> = {
+        user_id: user.id,
+        checkin_date: date,
+        recovery_score: Math.round(rec.score.recovery_score),
+        hrv_ms: Math.round(rec.score.hrv_rmssd_milli * 10) / 10,
+        resting_hr: Math.round(rec.score.resting_heart_rate),
+      };
+
+      if (sleep) {
+        update.sleep_hours = sleep.hours;
+        if (sleep.efficiency !== null) {
+          update.sleep_quality = Math.round(sleep.efficiency / 10);
+        }
+      }
+
+      await admin
+        .from("daily_checkins")
+        .upsert(update, { onConflict: "user_id,checkin_date", ignoreDuplicates: false });
+    }
+  } catch (syncErr) {
+    // Non-fatal: token is stored, user is connected, sync can retry later.
+    console.error("WHOOP post-connect sync failed", syncErr);
   }
 
   return NextResponse.redirect(appUrl("/dashboard?whoop=connected"));
