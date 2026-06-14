@@ -114,6 +114,13 @@ export const OUTCOME_OPTIONS: { value: string; label: string }[] = [
   { value: "unknown", label: "Unknown" },
 ];
 
+// Coach self-grade (Layer 1) — performance prediction vs. actual workout log.
+export const SELF_GRADE_OPTIONS: { value: string; label: string }[] = [
+  { value: "accurate", label: "Accurate" },
+  { value: "slightly_off", label: "Slightly Off" },
+  { value: "missed", label: "Missed" },
+];
+
 // Feedback question option sets
 export const YSN_OPTIONS: { value: string; label: string }[] = [
   { value: "yes", label: "Yes" },

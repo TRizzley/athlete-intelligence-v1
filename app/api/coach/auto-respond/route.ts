@@ -22,7 +22,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateCoachDraft } from "@/lib/coach-draft";
 import { friendlyCoachError } from "@/lib/coach-errors";
-import { scorePredictionOutcome } from "@/lib/coach-predictions";
+import { scorePredictionOutcome, gradePredictionVsWorkout } from "@/lib/coach-predictions";
+import type { PredictionSelfGrade } from "@/lib/coach-predictions";
 import type { CoachContext, ChatTurn } from "@/lib/coach-types";
 import { buildCoachContext } from "@/lib/context";
 import { buildTrustSnapshotRow, flattenOutcomes } from "@/lib/metrics";
@@ -125,6 +126,10 @@ export async function POST(request: Request) {
   const predsAll = baseCtx.predictions;
   const checkins = baseCtx.recentCheckins;
   const checkinByDate = new Map(checkins.map((c) => [c.checkin_date, c]));
+  // Workout logs keyed by date, for Layer-1 self-grading of performance predictions.
+  const workoutByDate = new Map(
+    (baseCtx.recentWorkouts ?? []).map((w) => [w.session_date, w]),
+  );
 
   const toScore = predsAll.filter((p) => {
     const po = p.prediction_outcomes;
@@ -160,12 +165,25 @@ export async function POST(request: Request) {
           .sort((a, b) => (a.checkin_date < b.checkin_date ? 1 : -1))[0] ?? null;
 
       try {
-        const score = await scorePredictionOutcome(
-          p.prediction_text,
-          p.target_date!,
-          actual,
-          prior,
-        );
+        // Score against the check-in AND self-grade against the workout log
+        // (Layer 1). Self-grade is best-effort and stays null with no workout.
+        const workout = workoutByDate.get(p.target_date!) ?? null;
+        const [score, selfGrade] = await Promise.all([
+          scorePredictionOutcome(
+            p.prediction_text,
+            p.target_date!,
+            actual,
+            prior,
+          ),
+          gradePredictionVsWorkout(
+            p.prediction_text,
+            p.target_date!,
+            workout,
+          ).catch((err): PredictionSelfGrade | null => {
+            console.warn("[auto-respond] self-grade failed for", p.id, err);
+            return null;
+          }),
+        ]);
         const { error: outErr } = await admin
           .from("prediction_outcomes")
           .upsert(
@@ -173,6 +191,8 @@ export async function POST(request: Request) {
               prediction_id: p.id,
               outcome: score.outcome,
               notes: score.notes || null,
+              self_grade: selfGrade?.self_grade ?? null,
+              self_grade_note: selfGrade?.note || null,
               recorded_by: userId,
             },
             { onConflict: "prediction_id", ignoreDuplicates: true },
@@ -185,6 +205,8 @@ export async function POST(request: Request) {
               prediction_id: p.id,
               outcome: score.outcome,
               notes: score.notes || null,
+              self_grade: selfGrade?.self_grade ?? null,
+              self_grade_note: selfGrade?.note || null,
               recorded_by: userId,
               recorded_at: new Date().toISOString(),
             },

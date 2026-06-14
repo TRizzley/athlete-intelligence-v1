@@ -276,10 +276,12 @@ export function buildContextText(ctx: CoachContext, closing?: string): string {
         confidence: p.confidence,
         outcome: o?.outcome,
         outcome_notes: o?.notes,
+        self_grade: o?.self_grade,
+        self_grade_note: o?.self_grade_note,
       });
     });
     parts.push(
-      "PAST PREDICTIONS & OUTCOMES (your track record with this athlete — learn from what came true vs missed):\n" +
+      "PAST PREDICTIONS & OUTCOMES (your track record with this athlete — outcome is vs. the morning check-in; self_grade is how your performance call held up against the actual workout log. Learn from where you were accurate vs. slightly off vs. missed):\n" +
         JSON.stringify(preds, null, 2),
     );
   }

@@ -23,7 +23,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateWorkoutReview, type MorningPredictionResult } from "@/lib/coach-workout";
-import { scorePredictionOutcome } from "@/lib/coach-predictions";
+import { scorePredictionOutcome, gradePredictionVsWorkout } from "@/lib/coach-predictions";
+import type { PredictionSelfGrade } from "@/lib/coach-predictions";
 import { friendlyCoachError } from "@/lib/coach-errors";
 import type { ChatTurn } from "@/lib/coach-types";
 import { buildCoachContext } from "@/lib/context";
@@ -123,17 +124,34 @@ export async function POST(request: Request) {
       ctx.recentCheckins.find((c: DailyCheckin) => c.checkin_date < ackDate) ?? null;
     if (actual) {
       try {
-        const score = await scorePredictionOutcome(
-          todaysPrediction.prediction_text,
-          ackDate,
-          actual,
-          prior,
-        );
+        // Score against the check-in AND self-grade against the just-logged
+        // workout (Layer 1). The self-grade is best-effort and never blocks the
+        // outcome — it stays null when there's no workout to compare against.
+        const todaysWorkout =
+          ctx.recentWorkouts?.find((w) => w.session_date === ackDate) ?? null;
+        const [score, selfGrade] = await Promise.all([
+          scorePredictionOutcome(
+            todaysPrediction.prediction_text,
+            ackDate,
+            actual,
+            prior,
+          ),
+          gradePredictionVsWorkout(
+            todaysPrediction.prediction_text,
+            ackDate,
+            todaysWorkout,
+          ).catch((err): PredictionSelfGrade | null => {
+            console.warn("[post-workout] self-grade failed:", err);
+            return null;
+          }),
+        ]);
         await admin.from("prediction_outcomes").upsert(
           {
             prediction_id: todaysPrediction.id,
             outcome: score.outcome,
             notes: score.notes || null,
+            self_grade: selfGrade?.self_grade ?? null,
+            self_grade_note: selfGrade?.note || null,
             recorded_by: userId,
           },
           { onConflict: "prediction_id", ignoreDuplicates: true },
@@ -169,6 +187,35 @@ export async function POST(request: Request) {
   });
   if (msgErr) {
     return json({ ok: false, error: msgErr.message }, 500);
+  }
+
+  // 6b. Layer 2 — post a low-friction, one-tap feedback prompt right after the
+  //     review, tied to this morning's decision. The chat UI renders it as tap
+  //     buttons (Nailed it / Sort of / Off) so the athlete answers in one tap.
+  //     We embed the morning response's id so the tap upserts user_feedback for
+  //     the right decision. Skip silently if there's no morning decision to rate
+  //     or if it's already been answered.
+  const morningResponse =
+    ctx.previousResponses.find((r) => r.response_date === ackDate && r.status === "sent") ??
+    null;
+  if (morningResponse) {
+    const { data: existingFb } = await admin
+      .from("user_feedback")
+      .select("id")
+      .eq("coach_response_id", morningResponse.id)
+      .maybeSingle();
+    if (!existingFb) {
+      const promptBody =
+        "Quick gut check — did today's session go like I called it this morning?\n" +
+        `<feedback_prompt>${JSON.stringify({ response_id: morningResponse.id })}</feedback_prompt>`;
+      await admin.from("coach_messages").insert({
+        user_id: userId,
+        role: "coach",
+        body: promptBody,
+        ai_generated: true,
+        kind: "feedback_prompt",
+      });
+    }
   }
 
   // 7. Log the tomorrow-morning prediction so it's scoreable against tomorrow's

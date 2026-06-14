@@ -25,6 +25,34 @@ export default async function CoachChatPage({
     .limit(200);
 
   const messages = (data as CoachMessage[]) ?? [];
+
+  // Which feedback_prompt cards have already been answered, so the chat renders
+  // them as "logged" instead of re-asking. Pull the response_ids the prompts
+  // reference, then look up which already have feedback.
+  const promptResponseIds = messages
+    .filter((m) => m.kind === "feedback_prompt")
+    .map((m) => m.body.match(/<feedback_prompt>([\s\S]*?)<\/feedback_prompt>/)?.[1])
+    .map((raw) => {
+      if (!raw) return null;
+      try {
+        return (JSON.parse(raw.trim()) as { response_id?: string }).response_id ?? null;
+      } catch {
+        return null;
+      }
+    })
+    .filter((v): v is string => !!v);
+
+  let answeredResponseIds: string[] = [];
+  if (promptResponseIds.length > 0) {
+    const { data: fbRows } = await supabase
+      .from("user_feedback")
+      .select("coach_response_id")
+      .in("coach_response_id", promptResponseIds);
+    answeredResponseIds = ((fbRows as { coach_response_id: string }[]) ?? []).map(
+      (r) => r.coach_response_id,
+    );
+  }
+
   const today = await serverToday();
 
   return (
@@ -52,6 +80,7 @@ export default async function CoachChatPage({
       <Chat
         messages={messages}
         expect={expect === "brief" || expect === "review" ? expect : null}
+        answeredResponseIds={answeredResponseIds}
       />
     </PageShell>
   );

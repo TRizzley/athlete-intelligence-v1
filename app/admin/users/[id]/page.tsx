@@ -7,6 +7,7 @@ import {
   DataPoint,
   MetricBar,
   OutcomeBadge,
+  SelfGradeBadge,
   StatusPill,
   ConfidenceBadge,
   Prose,
@@ -294,11 +295,17 @@ export default async function AthleteReviewPage({
                             {p.confidence ? ` · ${p.confidence} confidence` : ""}
                           </p>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <SelfGradeBadge value={o?.self_grade ?? null} />
                           <OutcomeBadge value={o?.outcome ?? null} />
                           <DeletePredictionButton userId={id} predictionId={p.id} />
                         </div>
                       </div>
+                      {o?.self_grade_note ? (
+                        <p className="mt-1.5 text-xs text-muted-2">
+                          <span className="font-medium text-muted">Self-grade:</span> {o.self_grade_note}
+                        </p>
+                      ) : null}
                       <OutcomeForm userId={id} prediction={p} outcome={o} />
                     </div>
                   );

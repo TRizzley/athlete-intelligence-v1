@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { sendMessage, type FormState } from "./actions";
+import { sendMessage, submitQuickFeedback, type FormState } from "./actions";
 import { SubmitButton } from "@/components/interactive";
 import { relativeTime, todayISO } from "@/lib/format";
 import type { CoachMessage } from "@/lib/types";
@@ -22,6 +22,20 @@ function extractProposal(body: string): { text: string; proposal: WorkoutProposa
     return { text, proposal };
   } catch {
     return { text: body, proposal: null };
+  }
+}
+
+// A one-tap feedback prompt embeds the morning decision's id so a tap can record
+// feedback against the right response. Parsed out the same way as proposals.
+function extractFeedbackPrompt(body: string): { text: string; responseId: string | null } {
+  const match = body.match(/<feedback_prompt>([\s\S]*?)<\/feedback_prompt>/);
+  if (!match) return { text: body, responseId: null };
+  const text = body.replace(/<feedback_prompt>[\s\S]*?<\/feedback_prompt>/, "").trim();
+  try {
+    const parsed = JSON.parse(match[1].trim()) as { response_id?: string };
+    return { text, responseId: parsed.response_id ?? null };
+  } catch {
+    return { text, responseId: null };
   }
 }
 
@@ -55,10 +69,13 @@ export type ExpectKind = "brief" | "review" | null;
 export function Chat({
   messages,
   expect = null,
+  answeredResponseIds = [],
 }: {
   messages: CoachMessage[];
   expect?: ExpectKind;
+  answeredResponseIds?: string[];
 }) {
+  const answeredSet = new Set(answeredResponseIds);
   const router = useRouter();
   const [state, action, isPending] = useActionState(sendMessage, initial);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -162,7 +179,11 @@ export function Chat({
                 <span className="h-px flex-1 bg-border" />
               </div>
             ) : (
-              <Bubble key={item.id} message={item} />
+              <Bubble
+                key={item.id}
+                message={item}
+                answeredSet={answeredSet}
+              />
             ),
           )
         )}
@@ -260,7 +281,83 @@ function Typing({ label }: { label: string }) {
 const KIND_LABELS: Record<string, string> = {
   morning_brief: "Morning brief",
   workout_review: "Workout review",
+  feedback_prompt: "Quick feedback",
 };
+
+// One-tap feedback card rendered under a feedback_prompt message. Three taps map
+// to "did my call land?" — Nailed it / Sort of / Off. An optional one-line note
+// can ride along. Submitting records feedback for the embedded morning decision.
+const QUICK_FEEDBACK_OPTIONS: { value: "yes" | "somewhat" | "no"; label: string }[] = [
+  { value: "yes", label: "Nailed it" },
+  { value: "somewhat", label: "Sort of" },
+  { value: "no", label: "Off" },
+];
+
+function QuickFeedbackCard({
+  responseId,
+  alreadyAnswered,
+}: {
+  responseId: string;
+  alreadyAnswered: boolean;
+}) {
+  const [status, setStatus] = useState<"idle" | "saving" | "done" | "error">(
+    alreadyAnswered ? "done" : "idle",
+  );
+  const [errorMsg, setErrorMsg] = useState("");
+  const [comment, setComment] = useState("");
+
+  async function submit(rating: "yes" | "somewhat" | "no") {
+    setStatus("saving");
+    try {
+      const res = await submitQuickFeedback(responseId, rating, comment);
+      if (res.ok) {
+        setStatus("done");
+      } else {
+        setStatus("error");
+        setErrorMsg(res.error ?? "Could not save that.");
+      }
+    } catch {
+      setStatus("error");
+      setErrorMsg("Could not save that.");
+    }
+  }
+
+  if (status === "done") {
+    return (
+      <div className="mt-2 rounded-xl border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-600 dark:text-green-400">
+        ✓ Thanks — logged. This is what sharpens tomorrow&apos;s call.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-xl border border-accent/30 bg-accent/5 px-3 py-2.5">
+      <div className="flex flex-wrap gap-2">
+        {QUICK_FEEDBACK_OPTIONS.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => submit(o.value)}
+            disabled={status === "saving"}
+            className="rounded-lg border border-accent/40 bg-surface-2 px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent/10 disabled:opacity-50"
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <input
+        type="text"
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder="Add a word (optional)…"
+        className="input mt-2 h-9 text-sm"
+      />
+      {status === "error" ? (
+        <p className="mt-1.5 text-xs text-danger">{errorMsg}</p>
+      ) : null}
+    </div>
+  );
+}
 
 function WorkoutProposalCard({ proposal }: { proposal: WorkoutProposal }) {
   const [status, setStatus] = useState<"idle" | "applying" | "done" | "error">("idle");
@@ -319,10 +416,31 @@ function WorkoutProposalCard({ proposal }: { proposal: WorkoutProposal }) {
   );
 }
 
-function Bubble({ message }: { message: CoachMessage }) {
+function Bubble({
+  message,
+  answeredSet,
+}: {
+  message: CoachMessage;
+  answeredSet: Set<string>;
+}) {
   const mine = message.role === "athlete";
   const kindLabel = !mine ? KIND_LABELS[message.kind] : undefined;
-  const { text, proposal } = mine ? { text: message.body, proposal: null } : extractProposal(message.body);
+  const isFeedbackPrompt = !mine && message.kind === "feedback_prompt";
+
+  let text = message.body;
+  let proposal: WorkoutProposal | null = null;
+  let feedbackResponseId: string | null = null;
+  if (!mine) {
+    if (isFeedbackPrompt) {
+      const fb = extractFeedbackPrompt(message.body);
+      text = fb.text;
+      feedbackResponseId = fb.responseId;
+    } else {
+      const ex = extractProposal(message.body);
+      text = ex.text;
+      proposal = ex.proposal;
+    }
+  }
 
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
@@ -344,6 +462,12 @@ function Bubble({ message }: { message: CoachMessage }) {
           {text}
         </div>
         {proposal ? <WorkoutProposalCard proposal={proposal} /> : null}
+        {feedbackResponseId ? (
+          <QuickFeedbackCard
+            responseId={feedbackResponseId}
+            alreadyAnswered={answeredSet.has(feedbackResponseId)}
+          />
+        ) : null}
         <div className={`mt-1 text-[11px] text-muted-2 ${mine ? "text-right" : "text-left"}`}>
           {mine ? "You" : "Coach"} · {relativeTime(message.created_at)}
         </div>

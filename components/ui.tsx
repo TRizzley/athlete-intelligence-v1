@@ -128,6 +128,27 @@ export function StatusPill({ value }: { value: string }) {
   );
 }
 
+// Layer-1 coach self-grade: performance prediction vs. the actual workout log.
+// Admin-only; prefixed "Self:" so it's never confused with the check-in outcome.
+export function SelfGradeBadge({ value }: { value: string | null }) {
+  if (!value) return null;
+  const map: Record<string, string> = {
+    accurate: "bg-success/15 text-success",
+    slightly_off: "bg-warning/15 text-warning",
+    missed: "bg-danger/15 text-danger",
+  };
+  const label: Record<string, string> = {
+    accurate: "Accurate",
+    slightly_off: "Slightly Off",
+    missed: "Missed",
+  };
+  return (
+    <span className={`pill ${map[value] ?? "bg-surface-3 text-muted-2"}`}>
+      Self: {label[value] ?? value}
+    </span>
+  );
+}
+
 export function OutcomeBadge({ value }: { value: string | null }) {
   if (!value) return <span className="pill bg-surface-3 text-muted-2">Not scored</span>;
   const map: Record<string, string> = {

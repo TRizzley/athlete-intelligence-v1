@@ -18,6 +18,8 @@ export type ScreenshotSource =
   | "nutrition"
   | "other";
 export type Outcome = "came_true" | "partially" | "false" | "too_early" | "unknown";
+// Coach's self-grade of its own performance prediction vs. the actual workout log.
+export type SelfGrade = "accurate" | "slightly_off" | "missed";
 
 export type YesSomewhatNo = "yes" | "somewhat" | "no";
 export type PredictionFeedback = "yes" | "somewhat" | "no" | "too_early";
@@ -124,7 +126,11 @@ export interface UploadedScreenshot {
   applied_at: string | null;
 }
 
-export type CoachMessageKind = "chat" | "morning_brief" | "workout_review";
+export type CoachMessageKind =
+  | "chat"
+  | "morning_brief"
+  | "workout_review"
+  | "feedback_prompt";
 
 export interface CoachMessage {
   id: string;
@@ -235,6 +241,10 @@ export interface PredictionOutcome {
   prediction_id: string;
   outcome: Outcome;
   notes: string | null;
+  // Layer-1 self-grade: how the performance prediction held up vs. the actual
+  // logged workout. Admin-visible only. Null when there was no workout to grade.
+  self_grade: SelfGrade | null;
+  self_grade_note: string | null;
   recorded_by: string | null;
   recorded_at: string;
 }
