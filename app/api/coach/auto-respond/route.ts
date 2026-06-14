@@ -24,6 +24,8 @@ import { generateCoachDraft } from "@/lib/coach-draft";
 import { friendlyCoachError } from "@/lib/coach-errors";
 import { scorePredictionOutcome, gradePredictionVsWorkout } from "@/lib/coach-predictions";
 import type { PredictionSelfGrade } from "@/lib/coach-predictions";
+import { analyzeTrends, refreshWorkoutDataStats } from "@/lib/coach-trends";
+import type { TrendInsights } from "@/lib/coach-trends";
 import type { CoachContext, ChatTurn } from "@/lib/coach-types";
 import { buildCoachContext } from "@/lib/context";
 import { buildTrustSnapshotRow, flattenOutcomes } from "@/lib/metrics";
@@ -254,12 +256,40 @@ export async function POST(request: Request) {
     };
   }
 
+  // 7b. Trend engine — only once the athlete passes the 30-day gate. The gate is
+  //     a cheap read of the materialized profile stat; lazily backfill it once for
+  //     athletes who predate the stat column. analyzeTrends returns null when the
+  //     gate is closed, so the coach simply runs in normal mode below.
+  let trendInsights: TrendInsights | null = null;
+  try {
+    let profileForGate = baseCtx.profile;
+    if (profileForGate && !profileForGate.workout_data_start_date) {
+      const stats = await refreshWorkoutDataStats(userId, admin);
+      profileForGate = {
+        ...profileForGate,
+        workout_data_start_date: stats.startDate,
+        workout_log_count: stats.logCount,
+      };
+    }
+    trendInsights = await analyzeTrends(
+      admin,
+      userId,
+      responseDate,
+      profileForGate,
+      checkins,
+    );
+  } catch (err) {
+    console.warn("[auto-respond] trend analysis failed:", err);
+    /* best-effort; fall back to normal coaching with no trend block */
+  }
+
   // 8. Assemble the final context for Claude.
   const ctx: CoachContext = {
     ...baseCtx,
     predictions: predsAll,  // includes any newly scored outcomes
     recentMessages,
     programContext,
+    trendInsights,
   };
 
   let draft;
@@ -325,6 +355,45 @@ export async function POST(request: Request) {
       ai_generated: true,
       kind: "morning_brief",
     });
+  }
+
+  // 10b. Rare standalone trend alert. The trend engine's calls already land in the
+  //      PREP beat of the brief above; we additionally drop a separate, can't-miss
+  //      coach message ONLY for a genuinely important signal (a significant
+  //      progression or a regression/notable stall), and at most once every 5 days
+  //      so it never becomes noise. Dedup is tracked by a private memory note.
+  if (trendInsights?.significantAlert) {
+    try {
+      const fiveDaysAgo = new Date(
+        Date.parse(responseDate + "T00:00:00Z") - 5 * 86400000,
+      ).toISOString();
+      const { data: recentAlert } = await admin
+        .from("athlete_memory_notes")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("category", "trend_alert")
+        .gte("created_at", fiveDaysAgo)
+        .limit(1)
+        .maybeSingle();
+      if (!recentAlert) {
+        await admin.from("coach_messages").insert({
+          user_id: userId,
+          role: "coach",
+          body: trendInsights.significantAlert,
+          ai_generated: true,
+          kind: "chat",
+        });
+        await admin.from("athlete_memory_notes").insert({
+          user_id: userId,
+          category: "trend_alert",
+          note: `[trend_alert] ${trendInsights.significantAlert}`,
+          created_by: userId,
+        });
+      }
+    } catch (err) {
+      console.warn("[auto-respond] trend alert post failed:", err);
+      /* best-effort; the call is already in the morning brief's PREP */
+    }
   }
 
   // 11. Log a tracked, scoreable prediction so the accuracy metric fills in.

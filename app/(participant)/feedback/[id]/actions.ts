@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { embedText } from "@/lib/embeddings";
 
 export type FormState = { error: string | null };
 
@@ -82,11 +83,14 @@ export async function saveFeedback(
         .eq("user_id", user.id)
         .eq("category", "feedback")
         .like("note", `${tag}%`);
+      const noteText = `${tag} ${parts.join(" ")}`;
+      const embedding = await embedText(noteText);
       await admin.from("athlete_memory_notes").insert({
         user_id: user.id,
         category: "feedback",
-        note: `${tag} ${parts.join(" ")}`,
+        note: noteText,
         created_by: user.id,
+        ...(embedding ? { embedding: `[${embedding.join(",")}]` } : {}),
       });
     }
   } catch {

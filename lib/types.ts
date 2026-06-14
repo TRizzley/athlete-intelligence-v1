@@ -64,6 +64,9 @@ export interface AthleteProfile {
   coaching_wants: string | null;
   life_context: string | null;
   background: string | null;
+  // Trend-engine gate stats (materialized; refreshed on session completion).
+  workout_data_start_date: string | null; // first completed workout date (YYYY-MM-DD)
+  workout_log_count: number | null;        // completed workout sessions logged
   created_at: string;
   updated_at: string;
 }

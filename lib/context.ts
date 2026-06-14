@@ -25,6 +25,7 @@ import type {
   AthleteMemoryNote,
 } from "./types";
 import type { CoachContext, ChatTurn, WorkoutLogBrief, WorkoutDayBrief, WorkoutExerciseBrief } from "./coach-types";
+import { embedText } from "./embeddings";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -83,7 +84,6 @@ export async function buildCoachContext(
     responsesRes,
     predictionsRes,
     feedbackRes,
-    memoryRes,
   ] = await Promise.all([
     admin.from("users").select("full_name, email").eq("id", userId).maybeSingle(),
     admin.from("athlete_profiles").select("*").eq("user_id", userId).maybeSingle(),
@@ -112,11 +112,6 @@ export async function buildCoachContext(
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(feedbackLimit),
-    admin
-      .from("athlete_memory_notes")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false }),
   ]);
 
   // Screenshots are optional — milestone-reports skips them to reduce noise.
@@ -135,6 +130,47 @@ export async function buildCoachContext(
   const userRec = userRes.data as { full_name: string | null; email: string | null } | null;
   const profile = (profileRes.data as AthleteProfile) ?? null;
   const checkins = (checkinsRes.data as DailyCheckin[]) ?? [];
+
+  // RAG memory retrieval — embed a summary of the current check-in context and
+  // retrieve the most relevant memory notes via cosine similarity. Falls back to
+  // loading all notes if embeddings are unavailable (missing OPENAI_API_KEY or API error).
+  const latestCheckinForQuery = checkins[0] ?? null;
+  let memoryNotes: AthleteMemoryNote[] = [];
+  {
+    const queryParts: string[] = [];
+    if (profile?.primary_goal) queryParts.push(`Goal: ${profile.primary_goal}`);
+    if (latestCheckinForQuery) {
+      const c = latestCheckinForQuery;
+      if (c.hrv_ms) queryParts.push(`HRV ${c.hrv_ms}ms`);
+      if (c.recovery_score) queryParts.push(`recovery score ${c.recovery_score}`);
+      if (c.sleep_hours) queryParts.push(`sleep ${c.sleep_hours}h`);
+      if (c.soreness) queryParts.push(`soreness ${c.soreness}/10`);
+      if (c.energy) queryParts.push(`energy ${c.energy}/10`);
+      if (c.stress) queryParts.push(`stress ${c.stress}/10`);
+      if (c.workout_types?.length) queryParts.push(`training: ${c.workout_types.join(", ")}`);
+      if (c.pain_injury_note) queryParts.push(`injury: ${c.pain_injury_note}`);
+      if (c.open_comments) queryParts.push(`notes: ${c.open_comments}`);
+    }
+    const queryText = queryParts.length > 0 ? queryParts.join(". ") : "athlete performance coaching";
+
+    const queryEmbedding = await embedText(queryText);
+    if (queryEmbedding) {
+      const { data: ragData } = await admin.rpc("match_athlete_memory_notes", {
+        p_user_id: userId,
+        p_embedding: `[${queryEmbedding.join(",")}]`,
+        p_match_count: 8,
+      });
+      memoryNotes = (ragData as AthleteMemoryNote[]) ?? [];
+    } else {
+      // Fallback: load all notes (original behavior — no OPENAI_API_KEY or embed failed)
+      const { data: allNotes } = await admin
+        .from("athlete_memory_notes")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+      memoryNotes = (allNotes as AthleteMemoryNote[]) ?? [];
+    }
+  }
 
   // Workout sessions + per-set logs (two queries: sessions first, then sets).
   let recentWorkouts: WorkoutLogBrief[] = [];
@@ -240,7 +276,7 @@ export async function buildCoachContext(
     latestCheckin,
     recentCheckins: checkins,
     screenshots,
-    memoryNotes: (memoryRes.data as AthleteMemoryNote[]) ?? [],
+    memoryNotes,
     previousResponses: (responsesRes.data as CoachResponse[]) ?? [],
     predictions: (predictionsRes.data as PredictionWithOutcome[]) ?? [],
     feedback: (feedbackRes.data as UserFeedback[]) ?? [],

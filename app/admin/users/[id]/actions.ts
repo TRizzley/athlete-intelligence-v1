@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { buildTrustSnapshotRow, flattenOutcomes } from "@/lib/metrics";
+import { embedText } from "@/lib/embeddings";
 import type { PredictionOutcome, UserFeedback } from "@/lib/types";
 
 export type FormState = { error: string | null; ok?: boolean };
@@ -294,11 +295,13 @@ export async function addMemoryNote(
   if (!userId) return { error: "Missing athlete." };
   if (!note) return { error: "Write a note." };
 
+  const embedding = await embedText(note);
   const { error } = await supabase.from("athlete_memory_notes").insert({
     user_id: userId,
     category: str(formData, "category"),
     note,
     created_by: user.id,
+    ...(embedding ? { embedding: `[${embedding.join(",")}]` } : {}),
   });
   if (error) return { error: error.message };
 

@@ -15,7 +15,7 @@
 //                      newlines preserved or escaped as \n
 //   APNS_KEY_ID     -- the 10-char Key ID for that key
 //   APNS_TEAM_ID    -- your 10-char Apple Developer Team ID
-//   APNS_BUNDLE_ID  -- the app bundle id, e.g. com.thecoach.app (apns-topic)
+//   APNS_BUNDLE_ID  -- the app bundle id, e.g. com.sprintv1.app (apns-topic)
 //   APNS_PRODUCTION -- "true" for the production gateway; anything else => sandbox
 // ----------------------------------------------------------------------------
 

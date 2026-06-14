@@ -2,7 +2,8 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { sendMessage, submitQuickFeedback, type FormState } from "./actions";
+import Link from "next/link";
+import { sendMessage, type FormState } from "./actions";
 import { SubmitButton } from "@/components/interactive";
 import { relativeTime, todayISO } from "@/lib/format";
 import type { CoachMessage } from "@/lib/types";
@@ -284,77 +285,29 @@ const KIND_LABELS: Record<string, string> = {
   feedback_prompt: "Quick feedback",
 };
 
-// One-tap feedback card rendered under a feedback_prompt message. Three taps map
-// to "did my call land?" — Nailed it / Sort of / Off. An optional one-line note
-// can ride along. Submitting records feedback for the embedded morning decision.
-const QUICK_FEEDBACK_OPTIONS: { value: "yes" | "somewhat" | "no"; label: string }[] = [
-  { value: "yes", label: "Nailed it" },
-  { value: "somewhat", label: "Sort of" },
-  { value: "no", label: "Off" },
-];
-
-function QuickFeedbackCard({
+// Feedback prompt card rendered under a feedback_prompt message. It does NOT
+// collect feedback inline — it hands off to the app's existing feedback tool
+// (/feedback/[id]) for the decision being rated. Once that tool has been used,
+// the card shows a submitted state instead of the CTA.
+function FeedbackPromptCard({
   responseId,
   alreadyAnswered,
 }: {
   responseId: string;
   alreadyAnswered: boolean;
 }) {
-  const [status, setStatus] = useState<"idle" | "saving" | "done" | "error">(
-    alreadyAnswered ? "done" : "idle",
-  );
-  const [errorMsg, setErrorMsg] = useState("");
-  const [comment, setComment] = useState("");
-
-  async function submit(rating: "yes" | "somewhat" | "no") {
-    setStatus("saving");
-    try {
-      const res = await submitQuickFeedback(responseId, rating, comment);
-      if (res.ok) {
-        setStatus("done");
-      } else {
-        setStatus("error");
-        setErrorMsg(res.error ?? "Could not save that.");
-      }
-    } catch {
-      setStatus("error");
-      setErrorMsg("Could not save that.");
-    }
-  }
-
-  if (status === "done") {
+  if (alreadyAnswered) {
     return (
       <div className="mt-2 rounded-xl border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-600 dark:text-green-400">
-        ✓ Thanks — logged. This is what sharpens tomorrow&apos;s call.
+        ✓ Feedback submitted — thanks. This is what sharpens the next call.
       </div>
     );
   }
-
   return (
     <div className="mt-2 rounded-xl border border-accent/30 bg-accent/5 px-3 py-2.5">
-      <div className="flex flex-wrap gap-2">
-        {QUICK_FEEDBACK_OPTIONS.map((o) => (
-          <button
-            key={o.value}
-            type="button"
-            onClick={() => submit(o.value)}
-            disabled={status === "saving"}
-            className="rounded-lg border border-accent/40 bg-surface-2 px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent/10 disabled:opacity-50"
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-      <input
-        type="text"
-        value={comment}
-        onChange={(e) => setComment(e.target.value)}
-        placeholder="Add a word (optional)…"
-        className="input mt-2 h-9 text-sm"
-      />
-      {status === "error" ? (
-        <p className="mt-1.5 text-xs text-danger">{errorMsg}</p>
-      ) : null}
+      <Link href={`/feedback/${responseId}`} className="btn-accent inline-block text-xs">
+        Rate that prediction
+      </Link>
     </div>
   );
 }
@@ -463,7 +416,7 @@ function Bubble({
         </div>
         {proposal ? <WorkoutProposalCard proposal={proposal} /> : null}
         {feedbackResponseId ? (
-          <QuickFeedbackCard
+          <FeedbackPromptCard
             responseId={feedbackResponseId}
             alreadyAnswered={answeredSet.has(feedbackResponseId)}
           />

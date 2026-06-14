@@ -345,6 +345,40 @@ export function buildContextText(ctx: CoachContext, closing?: string): string {
     );
   }
 
+  // Trend engine output (only present once the athlete passes the 30-day gate).
+  // These are pre-computed, data-grounded calls the coach should TRANSLATE into
+  // its own voice inside the PREP beat of the morning message — not a new section.
+  if (ctx.trendInsights) {
+    const t = ctx.trendInsights;
+    const lines: string[] = [];
+    lines.push(
+      "TREND ENGINE (computed from 30+ days of this athlete's logged data — use these to make real coaching calls today):",
+    );
+    lines.push(
+      `- INTERNAL READINESS = ${t.readiness.level} (${t.readiness.rationale}). ` +
+        "This is for YOU only: let it set how hard you push today (high = push, low = back off and protect the session). " +
+        "NEVER show the athlete a readiness score, percentage, or label — it only shapes your tone and the intensity you prescribe.",
+    );
+    if (t.progression.length > 0) {
+      lines.push(
+        "- PROGRESSION CALLS (surface these in the PREP beat, in your voice, with the data reason — recommend the move up):\n" +
+          t.progression.map((p) => `   • ${p.detail}`).join("\n"),
+      );
+    }
+    if (t.stalls.length > 0) {
+      lines.push(
+        "- STALLS (surface in the PREP beat with the specific fix — 2-3 sentences, a coach talking, not a report):\n" +
+          t.stalls.map((s) => `   • ${s.detail}`).join("\n"),
+      );
+    }
+    if (t.sleepFlag) lines.push(`- SLEEP TREND: ${t.sleepFlag} Factor it into how hard you push and say so briefly in PREP.`);
+    if (t.macroFlag) lines.push(`- MACRO TREND: ${t.macroFlag} Mention it briefly in PREP if it affects today.`);
+    lines.push(
+      "Weave the progression/stall/flag items into PREP only — do NOT add new sections or change the 4-beat format. If an item isn't relevant to today's session, leave it out.",
+    );
+    parts.push(lines.join("\n"));
+  }
+
   // Calibration from feedback goes LAST so it's the freshest instruction in mind.
   const calibration = feedbackCalibration(ctx.feedback);
   if (calibration) parts.push(calibration);

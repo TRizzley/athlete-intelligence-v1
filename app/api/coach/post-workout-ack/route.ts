@@ -23,7 +23,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateWorkoutReview, type MorningPredictionResult } from "@/lib/coach-workout";
-import { scorePredictionOutcome, gradePredictionVsWorkout } from "@/lib/coach-predictions";
+import {
+  scorePredictionOutcome,
+  gradePredictionVsWorkout,
+  buildFeedbackPromptText,
+} from "@/lib/coach-predictions";
 import type { PredictionSelfGrade } from "@/lib/coach-predictions";
 import { friendlyCoachError } from "@/lib/coach-errors";
 import type { ChatTurn } from "@/lib/coach-types";
@@ -189,12 +193,14 @@ export async function POST(request: Request) {
     return json({ ok: false, error: msgErr.message }, 500);
   }
 
-  // 6b. Layer 2 — post a low-friction, one-tap feedback prompt right after the
-  //     review, tied to this morning's decision. The chat UI renders it as tap
-  //     buttons (Nailed it / Sort of / Off) so the athlete answers in one tap.
-  //     We embed the morning response's id so the tap upserts user_feedback for
-  //     the right decision. Skip silently if there's no morning decision to rate
-  //     or if it's already been answered.
+  // 6b. Layer 2 — at the natural close of the conversation (right after the
+  //     review), post a short prompt that hands off to the app's EXISTING
+  //     feedback tool (/feedback/[id]) for this morning's decision. The prompt
+  //     names the session by type and makes explicit the athlete is rating the
+  //     pre-session call from this morning — NOT the new prediction just set for
+  //     next time. We embed the morning response's id so the feedback tool opens
+  //     on the right decision. Skip silently if there's nothing to rate or it's
+  //     already been answered.
   const morningResponse =
     ctx.previousResponses.find((r) => r.response_date === ackDate && r.status === "sent") ??
     null;
@@ -205,9 +211,12 @@ export async function POST(request: Request) {
       .eq("coach_response_id", morningResponse.id)
       .maybeSingle();
     if (!existingFb) {
+      // Name the session by the type they just trained (the logged workout's day).
+      const sessionType =
+        ctx.recentWorkouts?.find((w) => w.session_date === ackDate)?.day_name ?? null;
       const promptBody =
-        "Quick gut check — did today's session go like I called it this morning?\n" +
-        `<feedback_prompt>${JSON.stringify({ response_id: morningResponse.id })}</feedback_prompt>`;
+        buildFeedbackPromptText(sessionType) +
+        `\n<feedback_prompt>${JSON.stringify({ response_id: morningResponse.id })}</feedback_prompt>`;
       await admin.from("coach_messages").insert({
         user_id: userId,
         role: "coach",

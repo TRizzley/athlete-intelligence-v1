@@ -14,7 +14,6 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { exchangeWhoopCode, fetchWhoopProfile, fetchWhoopRecoveries, fetchWhoopSleeps } from "@/lib/whoop";
-import { cookies } from "next/headers";
 
 function appUrl(path: string): string {
   const base =
@@ -39,16 +38,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(appUrl(`/dashboard?whoop=error&reason=missing_code_or_state&params=${encodeURIComponent(params)}`));
   }
 
-  // Validate nonce
-  const cookieStore = await cookies();
-  const storedNonce = cookieStore.get("whoop_oauth_nonce")?.value;
-  cookieStore.delete("whoop_oauth_nonce");
-
-  if (!storedNonce || storedNonce !== state) {
-    return NextResponse.redirect(appUrl("/dashboard?whoop=invalid_state"));
-  }
-
-  // Require a Supabase session
+  // Require a Supabase session first so we can scope the nonce lookup.
   const supabase = await createClient();
   const {
     data: { user },
@@ -56,6 +46,22 @@ export async function GET(request: Request) {
 
   if (!user) {
     return NextResponse.redirect(appUrl("/login"));
+  }
+
+  // Validate nonce from DB (cookie-based nonces break on mobile OAuth redirects).
+  const admin = createAdminClient();
+  const { data: nonceRow } = await admin
+    .from("whoop_oauth_nonces")
+    .select("nonce, expires_at")
+    .eq("nonce", state)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  // Always delete the nonce (consumed or expired) to prevent replay.
+  await admin.from("whoop_oauth_nonces").delete().eq("nonce", state);
+
+  if (!nonceRow || new Date(nonceRow.expires_at) < new Date()) {
+    return NextResponse.redirect(appUrl("/dashboard?whoop=invalid_state"));
   }
 
   // Exchange code for tokens
@@ -77,7 +83,6 @@ export async function GET(request: Request) {
   }
 
   const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
-  const admin = createAdminClient();
 
   const { error: upsertErr } = await admin.from("whoop_tokens").upsert(
     {

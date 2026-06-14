@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { distillMemoryFromCheckin } from "@/lib/coach-memory";
+import { embedTexts } from "@/lib/embeddings";
 import type { AthleteMemoryNote } from "@/lib/types";
 
 export type FormState = { error: string | null };
@@ -136,12 +137,14 @@ export async function saveCheckin(
           pain_injury_note: painNote,
         });
         if (newNotes.length > 0) {
+          const embeddings = await embedTexts(newNotes.map((n) => n.note));
           await admin.from("athlete_memory_notes").insert(
-            newNotes.map((n) => ({
+            newNotes.map((n, i) => ({
               user_id: user.id,
               category: n.category ?? "constraint",
               note: n.note,
               created_by: user.id,
+              ...(embeddings[i] ? { embedding: `[${embeddings[i]!.join(",")}]` } : {}),
             })),
           );
           console.log(`[checkin] distilled ${newNotes.length} memory note(s) for user=${user.id}`);

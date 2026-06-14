@@ -129,6 +129,24 @@ export async function scorePredictionOutcome(
   return { outcome, notes: asString(o.notes) };
 }
 
+// ── Layer 2: feedback prompt language ─────────────────────────────────────────
+
+// Builds the coach's closing feedback-prompt line. It MUST make unmistakable that
+// the athlete is rating the prediction made for the session they just finished —
+// the call from the START of this session — and NOT the fresh prediction the coach
+// just set for next time. We name the session by type so there is no ambiguity
+// about which prediction is being graded. Fired only at the natural close of the
+// conversation (after the post-workout review), never mid-conversation.
+export function buildFeedbackPromptText(sessionType: string | null): string {
+  const session =
+    sessionType && sessionType.trim() ? sessionType.trim() : "session";
+  return (
+    `Before you go — how accurate was the prediction I made this morning for your ${session}? ` +
+    `I'm asking about the call I made BEFORE you trained today (the one for the session you just finished) — ` +
+    `not the new prediction I just set for next time. Rate it below so I can sharpen the next one.`
+  );
+}
+
 // ── Layer 1: coach self-grade vs. the actual workout log ──────────────────────
 
 const SELF_GRADE_SYSTEM_PROMPT = [

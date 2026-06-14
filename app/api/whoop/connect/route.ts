@@ -8,8 +8,8 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { whoopAuthUrl } from "@/lib/whoop";
-import { cookies } from "next/headers";
 import { randomUUID } from "crypto";
 
 function appUrl(path: string): string {
@@ -32,14 +32,18 @@ export async function GET() {
   const nonce = randomUUID();
   const redirectUri = appUrl("/api/whoop/callback");
 
-  const cookieStore = await cookies();
-  cookieStore.set("whoop_oauth_nonce", nonce, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: 600, // 10 minutes
-    path: "/",
+  // Store nonce in DB — cookies are unreliable on mobile OAuth redirects
+  // (iOS Safari PWA opens WHOOP in a separate browser context, losing cookies).
+  const admin = createAdminClient();
+  const { error } = await admin.from("whoop_oauth_nonces").insert({
+    nonce,
+    user_id: user.id,
   });
+
+  if (error) {
+    console.error("Failed to store WHOOP nonce", error);
+    return NextResponse.redirect(appUrl("/dashboard?whoop=error&reason=nonce_store_failed"));
+  }
 
   return NextResponse.redirect(whoopAuthUrl(redirectUri, nonce));
 }

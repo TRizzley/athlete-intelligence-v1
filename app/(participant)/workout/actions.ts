@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { refreshWorkoutDataStats } from "@/lib/coach-trends";
 import type { WorkoutExercise } from "@/lib/types";
 
 export type FormState = { error: string | null; ok?: boolean };
@@ -350,6 +352,14 @@ export async function saveSession(
     })
     .eq("id", sessionId)
     .eq("user_id", user.id);
+
+  // Refresh the trend-engine gate stats (first-workout date + completed count)
+  // so the 30-day gate stays a cheap profile-field read. Best-effort.
+  try {
+    await refreshWorkoutDataStats(user.id, createAdminClient());
+  } catch {
+    /* stats refresh is best-effort; never block saving the session */
+  }
 
   revalidatePath("/workout");
   revalidatePath("/dashboard");

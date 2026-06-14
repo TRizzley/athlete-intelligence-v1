@@ -6,61 +6,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { generateCoachChatReply } from "@/lib/coach-chat";
 import { friendlyCoachError } from "@/lib/coach-errors";
 import { distillMemoryFromChat } from "@/lib/coach-memory";
+import { embedTexts } from "@/lib/embeddings";
 import type { ChatTurn } from "@/lib/coach-types";
 import { buildCoachContext } from "@/lib/context";
 import { todayISO } from "@/lib/format";
 import type { CoachMessage } from "@/lib/types";
 
 export type FormState = { error: string | null; ok?: boolean };
-
-// Layer 2 — one-tap feedback. The chat's feedback_prompt card calls this with a
-// single rating (and optional comment). It upserts user_feedback for the morning
-// decision so the signal flows into the same metrics and coach-context loop as
-// the full feedback form. Returns a result object the client card can react to.
-export type QuickFeedbackResult = { ok: boolean; error?: string };
-
-export async function submitQuickFeedback(
-  responseId: string,
-  rating: "yes" | "somewhat" | "no",
-  comment?: string,
-): Promise<QuickFeedbackResult> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Your session expired. Please sign in again." };
-
-  if (!responseId) return { ok: false, error: "Missing response reference." };
-  if (!["yes", "somewhat", "no"].includes(rating)) {
-    return { ok: false, error: "Invalid rating." };
-  }
-
-  // Confirm the decision exists and belongs to this athlete.
-  const { data: resp } = await supabase
-    .from("coach_responses")
-    .select("id, user_id")
-    .eq("id", responseId)
-    .maybeSingle();
-  if (!resp || (resp as { user_id: string }).user_id !== user.id) {
-    return { ok: false, error: "That coaching response could not be found." };
-  }
-
-  const trimmed = comment?.trim() || null;
-  const { error } = await supabase.from("user_feedback").upsert(
-    {
-      user_id: user.id,
-      coach_response_id: responseId,
-      // The prompt asks "did today go like I called it?" — that's the prediction.
-      prediction_came_true: rating,
-      free_text: trimmed,
-    },
-    { onConflict: "coach_response_id" },
-  );
-  if (error) return { ok: false, error: error.message };
-
-  revalidatePath("/coach/chat");
-  return { ok: true };
-}
 
 export async function sendMessage(
   _prev: FormState,
@@ -176,12 +128,14 @@ export async function sendMessage(
         [...history, { role: "coach", body: reply }],
       );
       if (newNotes.length > 0) {
+        const embeddings = await embedTexts(newNotes.map((n) => n.note));
         await admin.from("athlete_memory_notes").insert(
-          newNotes.map((n) => ({
+          newNotes.map((n, i) => ({
             user_id: userId,
             category: n.category,
             note: n.note,
             created_by: userId,
+            ...(embeddings[i] ? { embedding: `[${embeddings[i]!.join(",")}]` } : {}),
           })),
         );
       }

@@ -41,6 +41,7 @@ const SYSTEM_PROMPT = [
   "TODAY — the hook. Your concrete performance prediction for today, using their real numbers (e.g. 'you should hit 245 on squat for 4x5'). Make it bold and specific — it should feel like a coach who watched their last few sessions, not a readiness score.",
   "",
   "PREP — the coaching meat. Be specific: (1) pre-workout nutrition tied to their logged macros and meal timing — what to eat, how much (grams), and when (e.g. '40g carbs + 25g protein ~90 min out'); (2) one warm-up or activation cue specific to today's session type; (3) a trend-based flag if there is one (e.g. 'your right hamstring has been the weak link the last two deadlift days — hit unilateral work in your warm-up'); (4) a short focus note only if sleep/stress warrants it.",
+  "  → If a TREND ENGINE block is provided in the context, this is where its calls belong: state the progression call (with the data reason and the recommended move up), deliver the stall fix (2-3 sentences, a coach talking), and briefly factor in any sleep/macro trend. Let the INTERNAL readiness signal set how hard you push — but never show it as a score or label. Weave all of this into PREP; do not add a new section.",
   "",
   "GO — one short closing line that sets the tone and gets them moving.",
   "",
