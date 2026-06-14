@@ -7,6 +7,7 @@ import { serverToday } from "@/lib/server-date";
 import { AutoCoachTrigger } from "@/components/auto-coach-trigger";
 import { PostWorkoutAckTrigger } from "@/components/post-workout-ack-trigger";
 import { PushOptIn } from "@/components/push-opt-in";
+import { WhoopSyncButton } from "@/components/whoop-sync-button";
 import type { DailyCheckin } from "@/lib/types";
 
 export const metadata = { title: "Today — The Coach" };
@@ -87,6 +88,7 @@ export default async function DashboardPage() {
         >
           {trained ? "Edit workout" : "Log workout"}
         </Link>
+        <WhoopSyncButton />
       </div>
 
       {/* Morning brief */}
