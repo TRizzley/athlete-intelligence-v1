@@ -118,17 +118,17 @@ export default async function DashboardPage() {
         >
           {trained ? "Edit workout" : "Log workout"}
         </Link>
-        {whoopConnected && !whoopExpired && <WhoopSyncButton />}
+        {whoopConnected && <WhoopSyncButton />}
       </div>
 
-      {/* WHOOP reconnect banner */}
-      {whoopExpired && (
+      {/* WHOOP: no token row → prompt to connect */}
+      {!whoopConnected && (
         <div className="card mb-4 flex items-center justify-between gap-4">
           <p className="text-sm text-muted">
-            WHOOP disconnected — reconnect to keep syncing your recovery data.
+            Connect WHOOP to automatically sync your recovery, HRV, sleep, and strain data.
           </p>
           <a href="/api/whoop/connect" className="btn-primary text-sm shrink-0">
-            Reconnect
+            Connect WHOOP
           </a>
         </div>
       )}
