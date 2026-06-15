@@ -12,7 +12,7 @@ export function WhoopCheckinSync() {
   useEffect(() => {
     fetch("/api/whoop/sync", { method: "POST" })
       .then((res) => {
-        if (res.ok) router.refresh();
+        if (res.ok) window.location.reload();
       })
       .catch(() => {/* non-fatal */});
   }, [router]);
