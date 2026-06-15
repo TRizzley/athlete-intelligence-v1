@@ -85,9 +85,10 @@ export default async function DashboardPage() {
   // WHOOP connection status
   const whoopToken = whoopTokenRes.data as { expires_at: string } | null;
   const whoopConnected = !!whoopToken;
-  const whoopExpired = whoopToken
-    ? new Date(whoopToken.expires_at) < new Date()
-    : false;
+  // Access tokens expire in ~1 hour but are auto-refreshed by getValidWhoopToken.
+  // Only show the reconnect banner when there's no token row at all (user never
+  // connected, or actively revoked access on the WHOOP side).
+  const whoopExpired = false;
 
   // Brief summary: first 2 sentences of the coach message
   function excerpt(body: string): string {
