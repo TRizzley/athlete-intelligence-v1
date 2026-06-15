@@ -164,6 +164,11 @@ export async function refreshWhoopToken(
 }
 
 // Returns a valid access token, refreshing if near expiry.
+// Handles the WHOOP single-use refresh token race condition: if multiple
+// concurrent requests all try to refresh the same token, only one wins.
+// Losers re-read the DB to pick up the winner's fresh token.
+// If refresh genuinely fails (revoked/expired), the row is deleted so the
+// dashboard shows "Connect WHOOP" instead of silently failing.
 export async function getValidWhoopToken(
   tokenRow: WhoopTokenRow,
   admin: AdminClient,
@@ -173,18 +178,36 @@ export async function getValidWhoopToken(
     return tokenRow.access_token;
   }
 
-  const fresh = await refreshWhoopToken(tokenRow);
+  try {
+    const fresh = await refreshWhoopToken(tokenRow);
+    await admin
+      .from("whoop_tokens")
+      .update({
+        access_token: fresh.access_token,
+        refresh_token: fresh.refresh_token,
+        expires_at: fresh.expires_at,
+      })
+      .eq("id", tokenRow.id);
+    return fresh.access_token;
+  } catch (refreshErr) {
+    // Refresh failed. WHOOP tokens are single-use — a concurrent request may
+    // have already refreshed and stored a new token. Re-read the DB to check.
+    const { data: latestRow } = await admin
+      .from("whoop_tokens")
+      .select("access_token, refresh_token, expires_at")
+      .eq("id", tokenRow.id)
+      .maybeSingle();
 
-  await admin
-    .from("whoop_tokens")
-    .update({
-      access_token: fresh.access_token,
-      refresh_token: fresh.refresh_token,
-      expires_at: fresh.expires_at,
-    })
-    .eq("id", tokenRow.id);
+    if (latestRow && latestRow.expires_at !== tokenRow.expires_at) {
+      // Another request won the race — use the token it stored.
+      return latestRow.access_token;
+    }
 
-  return fresh.access_token;
+    // Genuinely dead (user revoked access or refresh token expired).
+    // Delete the row so the user is prompted to reconnect on the dashboard.
+    await admin.from("whoop_tokens").delete().eq("id", tokenRow.id);
+    throw new Error(`WHOOP token refresh failed; user must reconnect. Cause: ${refreshErr}`);
+  }
 }
 
 // ── WHOOP API calls ───────────────────────────────────────────────────────────
