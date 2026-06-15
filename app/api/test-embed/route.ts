@@ -1,34 +1,29 @@
 import { NextResponse } from "next/server";
-import { embedText } from "@/lib/embeddings";
-import { createAdminClient } from "@/lib/supabase/admin";
+import OpenAI from "openai";
 
 export async function GET() {
-  const embedding = await embedText("test note for RAG");
+  const key = process.env.OPENAI_API_KEY;
 
-  if (!embedding) {
-    return NextResponse.json({ ok: false, error: "embedText returned null" }, { status: 500 });
+  // Step 1: is the key present?
+  if (!key) {
+    return NextResponse.json({ step: 1, error: "OPENAI_API_KEY is missing from env" }, { status: 500 });
   }
 
-  // Try inserting a test note with embedding directly
-  const admin = createAdminClient();
-  const { data: users } = await admin.from("users").select("id").limit(1);
-  const userId = users?.[0]?.id;
-
-  if (!userId) {
-    return NextResponse.json({ ok: true, embeddingDims: embedding.length, note: "no user to test insert" });
+  // Step 2: can we call the API directly?
+  try {
+    const client = new OpenAI({ apiKey: key });
+    const res = await client.embeddings.create({
+      model: "text-embedding-3-small",
+      input: "test",
+      dimensions: 1536,
+    });
+    return NextResponse.json({
+      ok: true,
+      keyPrefix: key.slice(0, 12),
+      dims: res.data[0].embedding.length,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ step: 2, error: msg, keyPrefix: key.slice(0, 12) }, { status: 500 });
   }
-
-  const { error } = await admin.from("athlete_memory_notes").insert({
-    user_id: userId,
-    category: "test",
-    note: "RAG test note — delete me",
-    created_by: userId,
-    embedding: `[${embedding.join(",")}]`,
-  });
-
-  return NextResponse.json({
-    ok: !error,
-    embeddingDims: embedding.length,
-    insertError: error?.message ?? null,
-  });
 }
