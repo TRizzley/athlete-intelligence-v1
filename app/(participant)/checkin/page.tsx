@@ -4,6 +4,7 @@ import { PageShell } from "@/components/ui";
 import { serverToday } from "@/lib/server-date";
 import { CheckinForm } from "./checkin-form";
 import { UploadForm } from "@/app/(participant)/upload/upload-form";
+import { WhoopCheckinSync } from "@/components/whoop-checkin-sync";
 import type { DailyCheckin, WorkoutDay } from "@/lib/types";
 
 export const metadata = { title: "Daily check-in — The Coach" };
@@ -13,7 +14,7 @@ export default async function CheckinPage() {
   const supabase = await createClient();
   const date = await serverToday();
 
-  const [{ data: existing }, { data: daysData }] = await Promise.all([
+  const [{ data: existing }, { data: daysData }, { data: whoopToken }] = await Promise.all([
     supabase
       .from("daily_checkins")
       .select("*")
@@ -25,13 +26,21 @@ export default async function CheckinPage() {
       .select("id, name, label")
       .eq("user_id", user.id)
       .order("position", { ascending: true }),
+    supabase
+      .from("whoop_tokens")
+      .select("expires_at")
+      .eq("user_id", user.id)
+      .maybeSingle(),
   ]);
+
+  const existingCheckin = (existing as DailyCheckin) ?? null;
+  const whoopConnected =
+    whoopToken != null &&
+    new Date((whoopToken as { expires_at: string }).expires_at) > new Date();
+  const missingBiometrics = existingCheckin?.recovery_score == null;
 
   const days = (daysData as Pick<WorkoutDay, "id" | "name" | "label">[]) ?? [];
 
-  // True when WHOOP has synced biometrics for today but the user hasn't
-  // manually filled in subjective fields yet (energy, mood, etc.).
-  const existingCheckin = (existing as DailyCheckin) ?? null;
   const whoopPrefilled =
     existingCheckin != null &&
     existingCheckin.recovery_score != null &&
@@ -39,6 +48,8 @@ export default async function CheckinPage() {
 
   return (
     <PageShell width="content">
+      {/* Silently sync WHOOP in the background if token is valid but today's biometrics are missing */}
+      {whoopConnected && missingBiometrics && <WhoopCheckinSync />}
       <div className="mb-6">
         <div className="eyebrow mb-1.5">Morning check-in</div>
         <h1 className="text-2xl font-semibold tracking-tight">How did you wake up?</h1>
