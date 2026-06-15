@@ -2,7 +2,7 @@
 -- Migration: workout-data stats for the trend-engine gate — June 2026
 --
 -- The trend-based coaching engine only activates once an athlete has at least
--- 30 days of workout history. To keep that gate check cheap (a single PK read of
+-- TREND_GATE_DAYS (currently 21) of workout history. To keep that gate check cheap (a single PK read of
 -- the profile row that's already loaded each session — never a scan of the
 -- workout tables on every page load), we materialize two stats onto the profile:
 --

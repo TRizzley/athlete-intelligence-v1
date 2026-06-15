@@ -354,7 +354,7 @@ export async function saveSession(
     .eq("user_id", user.id);
 
   // Refresh the trend-engine gate stats (first-workout date + completed count)
-  // so the 30-day gate stays a cheap profile-field read. Best-effort.
+  // so the trend-engine gate stays a cheap profile-field read. Best-effort.
   try {
     await refreshWorkoutDataStats(user.id, createAdminClient());
   } catch {

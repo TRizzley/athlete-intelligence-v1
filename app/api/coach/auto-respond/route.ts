@@ -256,7 +256,7 @@ export async function POST(request: Request) {
     };
   }
 
-  // 7b. Trend engine — only once the athlete passes the 30-day gate. The gate is
+  // 7b. Trend engine — only once the athlete passes the trend-engine gate. The gate is
   //     a cheap read of the materialized profile stat; lazily backfill it once for
   //     athletes who predate the stat column. analyzeTrends returns null when the
   //     gate is closed, so the coach simply runs in normal mode below.

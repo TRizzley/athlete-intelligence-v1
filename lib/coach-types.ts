@@ -74,5 +74,5 @@ export interface CoachContext {
   recentMessages?: ChatTurn[]; // recent coach<->athlete chat (oldest first)
   programContext?: ProgramContext; // absent for brand-new athletes
   workoutDays?: WorkoutDayBrief[]; // saved program structure (days + exercises with IDs)
-  trendInsights?: import("./coach-trends").TrendInsights | null; // trend engine output (gated; absent until 30 days of data)
+  trendInsights?: import("./coach-trends").TrendInsights | null; // trend engine output (gated; absent until 21 days of data)
 }

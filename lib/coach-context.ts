@@ -354,14 +354,14 @@ export function buildContextText(ctx: CoachContext, closing?: string): string {
     );
   }
 
-  // Trend engine output (only present once the athlete passes the 30-day gate).
+  // Trend engine output (only present once the athlete passes the 21-day gate).
   // These are pre-computed, data-grounded calls the coach should TRANSLATE into
   // its own voice inside the PREP beat of the morning message — not a new section.
   if (ctx.trendInsights) {
     const t = ctx.trendInsights;
     const lines: string[] = [];
     lines.push(
-      "TREND ENGINE (computed from 30+ days of this athlete's logged data — use these to make real coaching calls today):",
+      "TREND ENGINE (computed from 3+ weeks of this athlete's logged data — use these to make real coaching calls today):",
     );
     lines.push(
       `- INTERNAL READINESS = ${t.readiness.level} (${t.readiness.rationale}). ` +

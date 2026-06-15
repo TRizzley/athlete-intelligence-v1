@@ -1,8 +1,8 @@
 // ----------------------------------------------------------------------------
 // Trend-based coaching engine.
 //
-// Runs alongside the daily flow ONCE an athlete has >= 30 days of workout data
-// (the gate). It reads the existing workout log, sleep, and nutrition data and
+// Runs alongside the daily flow ONCE an athlete has >= TREND_GATE_DAYS of workout
+// data (the gate). It reads the existing workout log, sleep, and nutrition data and
 // turns it into real coaching signals the morning brief uses:
 //
 //   • readiness  — an INTERNAL high/moderate/low signal (sleep + macros + recent
@@ -27,7 +27,7 @@ import type { AthleteProfile, DailyCheckin } from "./types";
 type AdminClient = ReturnType<typeof createAdminClient>;
 
 // Gate: the engine activates once the athlete has this many days of data.
-export const TREND_GATE_DAYS = 30;
+export const TREND_GATE_DAYS = 21;
 
 // Trend windows.
 const LIFT_SESSION_WINDOW = 5; // last N sessions per lift for progression/stall
@@ -60,7 +60,7 @@ export interface TrendInsights {
 /**
  * Is the trend engine active for this athlete? Reads the materialized stat off
  * the profile row (already loaded each session) — a single clean field read, no
- * scan of the workout tables. Returns false until 30 days of data exist.
+ * scan of the workout tables. Returns false until TREND_GATE_DAYS of data exist.
  */
 export function isTrendGateOpen(
   profile: AthleteProfile | null,
