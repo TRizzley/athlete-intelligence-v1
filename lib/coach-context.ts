@@ -63,6 +63,15 @@ export function checkinBrief(c: DailyCheckin): Record<string, unknown> {
     motivation_1to10: c.motivation,
     pain_injury_note: c.pain_injury_note,
     open_comments: c.open_comments,
+    // Extended WHOOP biometrics
+    whoop_daily_strain: c.whoop_strain,
+    spo2_pct: c.spo2_percentage,
+    skin_temp_celsius: c.skin_temp_celsius,
+    sleep_light_hours: c.sleep_light_hours,
+    sleep_deep_hours: c.sleep_sws_hours,
+    sleep_rem_hours: c.sleep_rem_hours,
+    sleep_disturbances: c.sleep_disturbances,
+    respiratory_rate: c.respiratory_rate,
   });
 }
 

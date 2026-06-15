@@ -102,6 +102,15 @@ export interface DailyCheckin {
   motivation: number | null;
   pain_injury_note: string | null;
   open_comments: string | null;
+  // Extended WHOOP biometrics (add_whoop_extended_fields migration)
+  whoop_strain: number | null;
+  spo2_percentage: number | null;
+  skin_temp_celsius: number | null;
+  sleep_light_hours: number | null;
+  sleep_sws_hours: number | null;
+  sleep_rem_hours: number | null;
+  sleep_disturbances: number | null;
+  respiratory_rate: number | null;
   // Set when the coach has sent its short post-workout acknowledgment for this
   // day (idempotency key — the ack is sent at most once per logged session).
   post_workout_ack_at: string | null;

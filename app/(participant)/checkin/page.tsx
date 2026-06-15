@@ -9,6 +9,7 @@ import {
   getValidWhoopToken,
   fetchWhoopRecoveries,
   fetchWhoopSleeps,
+  fetchWhoopCycles,
   type WhoopTokenRow,
 } from "@/lib/whoop";
 import type { DailyCheckin, WorkoutDay } from "@/lib/types";
@@ -61,6 +62,14 @@ export default async function CheckinPage() {
     resting_hr?: number | null;
     sleep_hours?: number | null;
     sleep_quality?: number | null;
+    spo2_percentage?: number | null;
+    skin_temp_celsius?: number | null;
+    whoop_strain?: number | null;
+    sleep_light_hours?: number | null;
+    sleep_sws_hours?: number | null;
+    sleep_rem_hours?: number | null;
+    sleep_disturbances?: number | null;
+    respiratory_rate?: number | null;
   };
 
   let liveWhoopBiometrics: BiometricFields | null = null;
@@ -70,9 +79,10 @@ export default async function CheckinPage() {
       const token = tokenRow as WhoopTokenRow;
       const accessToken = await getValidWhoopToken(token, admin);
 
-      const [recoveries, sleeps] = await Promise.all([
+      const [recoveries, sleeps, cycles] = await Promise.all([
         fetchWhoopRecoveries(accessToken, sinceISO),
         fetchWhoopSleeps(accessToken, sinceISO),
+        fetchWhoopCycles(accessToken, sinceISO),
       ]);
 
       // Find the most recent scored recovery (covers today or yesterday cycle).
@@ -88,20 +98,35 @@ export default async function CheckinPage() {
           .sort((a, b) => (a.end > b.end ? -1 : 1))
           .find((s) => s.end.slice(0, 10) >= recDate);
 
+        // Get daily strain from the matching cycle.
+        const matchedCycle = cycles
+          .filter((c) => c.score_state === "SCORED" && c.score)
+          .sort((a, b) => (a.start > b.start ? -1 : 1))
+          .find((c) => c.start.slice(0, 10) === recDate);
+
+        const ss = matchedSleep?.score?.stage_summary;
         liveWhoopBiometrics = {
           recovery_score: Math.round(latest.score.recovery_score),
           hrv_ms: Math.round(latest.score.hrv_rmssd_milli * 10) / 10,
           resting_hr: Math.round(latest.score.resting_heart_rate),
-          sleep_hours: matchedSleep?.score
+          spo2_percentage: latest.score.spo2_percentage ?? null,
+          skin_temp_celsius: latest.score.skin_temp_celsius ?? null,
+          whoop_strain: matchedCycle?.score ? Math.round(matchedCycle.score.strain * 10) / 10 : null,
+          sleep_hours: ss
             ? msToHours(
-                matchedSleep.score.stage_summary.total_light_sleep_time_milli +
-                matchedSleep.score.stage_summary.total_slow_wave_sleep_time_milli +
-                matchedSleep.score.stage_summary.total_rem_sleep_time_milli,
+                ss.total_light_sleep_time_milli +
+                ss.total_slow_wave_sleep_time_milli +
+                ss.total_rem_sleep_time_milli,
               )
             : null,
           sleep_quality: matchedSleep?.score?.sleep_efficiency_percentage != null
             ? Math.round(matchedSleep.score.sleep_efficiency_percentage / 10)
             : null,
+          sleep_light_hours: ss ? msToHours(ss.total_light_sleep_time_milli) : null,
+          sleep_sws_hours: ss ? msToHours(ss.total_slow_wave_sleep_time_milli) : null,
+          sleep_rem_hours: ss ? msToHours(ss.total_rem_sleep_time_milli) : null,
+          sleep_disturbances: ss?.disturbance_count ?? null,
+          respiratory_rate: matchedSleep?.score?.respiratory_rate ?? null,
         };
 
         // Persist to DB so the coach and dashboard also see it.

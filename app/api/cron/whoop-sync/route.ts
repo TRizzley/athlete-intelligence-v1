@@ -1,11 +1,5 @@
-// ----------------------------------------------------------------------------
 // GET /api/cron/whoop-sync
-//
-// Runs daily via Vercel Cron. Loops over every user with a connected WHOOP
-// account and syncs the last 7 days of recovery + sleep into daily_checkins.
-//
-// Protected by CRON_SECRET (same pattern as /api/cron/reminders).
-// ----------------------------------------------------------------------------
+// Runs daily via Vercel Cron. Syncs last 7 days for all WHOOP users.
 
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -13,6 +7,7 @@ import {
   getValidWhoopToken,
   fetchWhoopRecoveries,
   fetchWhoopSleeps,
+  fetchWhoopCycles,
   type WhoopTokenRow,
 } from "@/lib/whoop";
 
@@ -42,11 +37,7 @@ export async function GET(request: Request) {
   }
 
   const admin = createAdminClient();
-
-  // Fetch all connected WHOOP tokens.
-  const { data: tokens, error } = await admin
-    .from("whoop_tokens")
-    .select("*");
+  const { data: tokens, error } = await admin.from("whoop_tokens").select("*");
 
   if (error || !tokens) {
     return NextResponse.json({ error: "failed_to_load_tokens" }, { status: 500 });
@@ -59,24 +50,38 @@ export async function GET(request: Request) {
     try {
       const accessToken = await getValidWhoopToken(tokenRow, admin);
 
-      const [recoveries, sleeps] = await Promise.all([
+      const [recoveries, sleeps, cycles] = await Promise.all([
         fetchWhoopRecoveries(accessToken, start),
         fetchWhoopSleeps(accessToken, start),
+        fetchWhoopCycles(accessToken, start),
       ]);
 
-      // Build sleep map (date → hours + efficiency).
-      const sleepByDate = new Map<string, { hours: number; efficiency: number | null }>();
+      type SleepEntry = {
+        hours: number; efficiency: number | null;
+        light_hours: number | null; sws_hours: number | null; rem_hours: number | null;
+        disturbances: number | null; respiratory_rate: number | null;
+      };
+      const sleepByDate = new Map<string, SleepEntry>();
       for (const sleep of sleeps) {
         if (sleep.nap || sleep.score_state !== "SCORED" || !sleep.score) continue;
         const date = sleep.end.slice(0, 10);
-        const totalSleepMs =
-          sleep.score.stage_summary.total_light_sleep_time_milli +
-          sleep.score.stage_summary.total_slow_wave_sleep_time_milli +
-          sleep.score.stage_summary.total_rem_sleep_time_milli;
+        const ss = sleep.score.stage_summary;
+        const totalMs = ss.total_light_sleep_time_milli + ss.total_slow_wave_sleep_time_milli + ss.total_rem_sleep_time_milli;
         sleepByDate.set(date, {
-          hours: msToHours(totalSleepMs),
+          hours: msToHours(totalMs),
           efficiency: sleep.score.sleep_efficiency_percentage ?? null,
+          light_hours: msToHours(ss.total_light_sleep_time_milli),
+          sws_hours: msToHours(ss.total_slow_wave_sleep_time_milli),
+          rem_hours: msToHours(ss.total_rem_sleep_time_milli),
+          disturbances: ss.disturbance_count ?? null,
+          respiratory_rate: sleep.score.respiratory_rate ?? null,
         });
+      }
+
+      const strainByDate = new Map<string, number>();
+      for (const cycle of cycles) {
+        if (cycle.score_state !== "SCORED" || !cycle.score) continue;
+        strainByDate.set(cycle.start.slice(0, 10), Math.round(cycle.score.strain * 10) / 10);
       }
 
       let synced = 0;
@@ -92,13 +97,19 @@ export async function GET(request: Request) {
           recovery_score: Math.round(rec.score.recovery_score),
           hrv_ms: Math.round(rec.score.hrv_rmssd_milli * 10) / 10,
           resting_hr: Math.round(rec.score.resting_heart_rate),
+          spo2_percentage: rec.score.spo2_percentage ?? null,
+          skin_temp_celsius: rec.score.skin_temp_celsius ?? null,
+          whoop_strain: strainByDate.get(date) ?? null,
         };
 
         if (sleep) {
           update.sleep_hours = sleep.hours;
-          if (sleep.efficiency !== null) {
-            update.sleep_quality = Math.round(sleep.efficiency / 10);
-          }
+          if (sleep.efficiency !== null) update.sleep_quality = Math.round(sleep.efficiency / 10);
+          update.sleep_light_hours = sleep.light_hours;
+          update.sleep_sws_hours = sleep.sws_hours;
+          update.sleep_rem_hours = sleep.rem_hours;
+          update.sleep_disturbances = sleep.disturbances;
+          update.respiratory_rate = sleep.respiratory_rate;
         }
 
         const { error: upsertErr } = await admin

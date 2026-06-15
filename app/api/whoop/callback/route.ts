@@ -1,25 +1,26 @@
-// ----------------------------------------------------------------------------
 // GET /api/whoop/callback
-//
-// WHOOP redirects here after the user authorizes (or denies) access.
-// Validates the nonce, exchanges the code for tokens, fetches the user
-// profile to get the whoop_user_id, and upserts the token row.
-//
-// Query params WHOOP sends:
-//   ?code=xxx&state=<nonce>       — success
-//   ?error=access_denied&...      — user declined
-// ----------------------------------------------------------------------------
+// WHOOP OAuth callback — validates nonce, exchanges code, stores token, kicks 30-day sync.
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { exchangeWhoopCode, fetchWhoopProfile, fetchWhoopRecoveries, fetchWhoopSleeps } from "@/lib/whoop";
+import {
+  exchangeWhoopCode,
+  fetchWhoopProfile,
+  fetchWhoopRecoveries,
+  fetchWhoopSleeps,
+  fetchWhoopCycles,
+} from "@/lib/whoop";
 
 function appUrl(path: string): string {
   const base =
     process.env.NEXT_PUBLIC_APP_URL ??
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
   return `${base}${path}`;
+}
+
+function msToHours(ms: number): number {
+  return Math.round((ms / 3_600_000) * 10) / 10;
 }
 
 export async function GET(request: Request) {
@@ -38,17 +39,10 @@ export async function GET(request: Request) {
     return NextResponse.redirect(appUrl(`/dashboard?whoop=error&reason=missing_code_or_state&params=${encodeURIComponent(params)}`));
   }
 
-  // Require a Supabase session first so we can scope the nonce lookup.
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.redirect(appUrl("/login"));
 
-  if (!user) {
-    return NextResponse.redirect(appUrl("/login"));
-  }
-
-  // Validate nonce from DB (cookie-based nonces break on mobile OAuth redirects).
   const admin = createAdminClient();
   const { data: nonceRow } = await admin
     .from("whoop_oauth_nonces")
@@ -57,14 +51,12 @@ export async function GET(request: Request) {
     .eq("user_id", user.id)
     .maybeSingle();
 
-  // Always delete the nonce (consumed or expired) to prevent replay.
   await admin.from("whoop_oauth_nonces").delete().eq("nonce", state);
 
   if (!nonceRow || new Date(nonceRow.expires_at) < new Date()) {
     return NextResponse.redirect(appUrl("/dashboard?whoop=invalid_state"));
   }
 
-  // Exchange code for tokens
   let tokenData;
   try {
     tokenData = await exchangeWhoopCode(code, appUrl("/api/whoop/callback"));
@@ -73,7 +65,6 @@ export async function GET(request: Request) {
     return NextResponse.redirect(appUrl("/dashboard?whoop=token_error"));
   }
 
-  // Fetch WHOOP user profile to get whoop_user_id
   let whoopProfile;
   try {
     whoopProfile = await fetchWhoopProfile(tokenData.access_token);
@@ -101,35 +92,45 @@ export async function GET(request: Request) {
     return NextResponse.redirect(appUrl("/dashboard?whoop=db_error"));
   }
 
-  // Trigger a 30-day historical sync immediately while the token is fresh.
+  // 30-day historical sync while the token is fresh.
   try {
-    const SYNC_DAYS = 30;
     const start = new Date();
-    start.setDate(start.getDate() - SYNC_DAYS);
+    start.setDate(start.getDate() - 30);
     start.setHours(0, 0, 0, 0);
     const startISO = start.toISOString();
 
-    function msToHours(ms: number): number {
-      return Math.round((ms / 3_600_000) * 10) / 10;
-    }
-
-    const [recoveries, sleeps] = await Promise.all([
+    const [recoveries, sleeps, cycles] = await Promise.all([
       fetchWhoopRecoveries(tokenData.access_token, startISO),
       fetchWhoopSleeps(tokenData.access_token, startISO),
+      fetchWhoopCycles(tokenData.access_token, startISO),
     ]);
 
-    const sleepByDate = new Map<string, { hours: number; efficiency: number | null }>();
+    type SleepEntry = {
+      hours: number; efficiency: number | null;
+      light_hours: number | null; sws_hours: number | null; rem_hours: number | null;
+      disturbances: number | null; respiratory_rate: number | null;
+    };
+    const sleepByDate = new Map<string, SleepEntry>();
     for (const sleep of sleeps) {
       if (sleep.nap || sleep.score_state !== "SCORED" || !sleep.score) continue;
       const date = sleep.end.slice(0, 10);
-      const totalSleepMs =
-        sleep.score.stage_summary.total_light_sleep_time_milli +
-        sleep.score.stage_summary.total_slow_wave_sleep_time_milli +
-        sleep.score.stage_summary.total_rem_sleep_time_milli;
+      const ss = sleep.score.stage_summary;
+      const totalMs = ss.total_light_sleep_time_milli + ss.total_slow_wave_sleep_time_milli + ss.total_rem_sleep_time_milli;
       sleepByDate.set(date, {
-        hours: msToHours(totalSleepMs),
+        hours: msToHours(totalMs),
         efficiency: sleep.score.sleep_efficiency_percentage ?? null,
+        light_hours: msToHours(ss.total_light_sleep_time_milli),
+        sws_hours: msToHours(ss.total_slow_wave_sleep_time_milli),
+        rem_hours: msToHours(ss.total_rem_sleep_time_milli),
+        disturbances: ss.disturbance_count ?? null,
+        respiratory_rate: sleep.score.respiratory_rate ?? null,
       });
+    }
+
+    const strainByDate = new Map<string, number>();
+    for (const cycle of cycles) {
+      if (cycle.score_state !== "SCORED" || !cycle.score) continue;
+      strainByDate.set(cycle.start.slice(0, 10), Math.round(cycle.score.strain * 10) / 10);
     }
 
     for (const rec of recoveries) {
@@ -143,13 +144,19 @@ export async function GET(request: Request) {
         recovery_score: Math.round(rec.score.recovery_score),
         hrv_ms: Math.round(rec.score.hrv_rmssd_milli * 10) / 10,
         resting_hr: Math.round(rec.score.resting_heart_rate),
+        spo2_percentage: rec.score.spo2_percentage ?? null,
+        skin_temp_celsius: rec.score.skin_temp_celsius ?? null,
+        whoop_strain: strainByDate.get(date) ?? null,
       };
 
       if (sleep) {
         update.sleep_hours = sleep.hours;
-        if (sleep.efficiency !== null) {
-          update.sleep_quality = Math.round(sleep.efficiency / 10);
-        }
+        if (sleep.efficiency !== null) update.sleep_quality = Math.round(sleep.efficiency / 10);
+        update.sleep_light_hours = sleep.light_hours;
+        update.sleep_sws_hours = sleep.sws_hours;
+        update.sleep_rem_hours = sleep.rem_hours;
+        update.sleep_disturbances = sleep.disturbances;
+        update.respiratory_rate = sleep.respiratory_rate;
       }
 
       await admin
@@ -157,7 +164,6 @@ export async function GET(request: Request) {
         .upsert(update, { onConflict: "user_id,checkin_date", ignoreDuplicates: false });
     }
   } catch (syncErr) {
-    // Non-fatal: token is stored, user is connected, sync can retry later.
     console.error("WHOOP post-connect sync failed", syncErr);
   }
 
