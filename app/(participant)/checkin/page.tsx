@@ -1,26 +1,36 @@
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { PageShell } from "@/components/ui";
 import { serverToday } from "@/lib/server-date";
 import { CheckinForm } from "./checkin-form";
 import { UploadForm } from "@/app/(participant)/upload/upload-form";
+import {
+  getValidWhoopToken,
+  fetchWhoopRecoveries,
+  fetchWhoopSleeps,
+  type WhoopTokenRow,
+} from "@/lib/whoop";
 import type { DailyCheckin, WorkoutDay } from "@/lib/types";
 
 export const metadata = { title: "Daily check-in — The Coach" };
 
-function yesterday(dateISO: string): string {
-  const d = new Date(dateISO + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
+function msToHours(ms: number): number {
+  return Math.round((ms / 3_600_000) * 10) / 10;
 }
 
 export default async function CheckinPage() {
   const user = await requireUser();
   const supabase = await createClient();
+  const admin = createAdminClient();
   const date = await serverToday();
-  const prev = yesterday(date);
 
-  const [{ data: existing }, { data: daysData }, { data: prevCheckin }] = await Promise.all([
+  // Start yesterday so we catch WHOOP cycles that closed overnight.
+  const since = new Date(date + "T00:00:00Z");
+  since.setUTCDate(since.getUTCDate() - 1);
+  const sinceISO = since.toISOString();
+
+  const [{ data: existing }, { data: daysData }, { data: tokenRow }] = await Promise.all([
     supabase
       .from("daily_checkins")
       .select("*")
@@ -32,20 +42,19 @@ export default async function CheckinPage() {
       .select("id, name, label")
       .eq("user_id", user.id)
       .order("position", { ascending: true }),
-    // Yesterday's row — used to pre-fill WHOOP biometrics when today's aren't
-    // available yet (WHOOP dates the recovery cycle to when sleep started).
-    supabase
-      .from("daily_checkins")
-      .select("recovery_score, hrv_ms, resting_hr, sleep_hours, sleep_quality")
+    admin
+      .from("whoop_tokens")
+      .select("*")
       .eq("user_id", user.id)
-      .eq("checkin_date", prev)
       .maybeSingle(),
   ]);
 
   const existingCheckin = (existing as DailyCheckin) ?? null;
   const days = (daysData as Pick<WorkoutDay, "id" | "name" | "label">[]) ?? [];
 
-  // Use yesterday's WHOOP biometrics to pre-fill when today's aren't synced yet.
+  // If WHOOP is connected and today's biometrics are missing, fetch live from
+  // the WHOOP API right now — this gets the score from this morning's cycle
+  // even if it hasn't been written to our DB yet.
   type BiometricFields = {
     recovery_score?: number | null;
     hrv_ms?: number | null;
@@ -53,22 +62,66 @@ export default async function CheckinPage() {
     sleep_hours?: number | null;
     sleep_quality?: number | null;
   };
-  const yesterdayBiometrics = prevCheckin as BiometricFields | null;
-  const whoopFallback =
-    existingCheckin?.recovery_score == null &&
-    yesterdayBiometrics?.recovery_score != null
-      ? yesterdayBiometrics
-      : null;
 
-  // Merge fallback into the existing checkin so CheckinForm can use defaultValue.
+  let liveWhoopBiometrics: BiometricFields | null = null;
+
+  if (existingCheckin?.recovery_score == null && tokenRow) {
+    try {
+      const token = tokenRow as WhoopTokenRow;
+      const accessToken = await getValidWhoopToken(token, admin);
+
+      const [recoveries, sleeps] = await Promise.all([
+        fetchWhoopRecoveries(accessToken, sinceISO),
+        fetchWhoopSleeps(accessToken, sinceISO),
+      ]);
+
+      // Find the most recent scored recovery (covers today or yesterday cycle).
+      const latest = recoveries
+        .filter((r) => r.score_state === "SCORED" && r.score)
+        .sort((a, b) => (a.created_at > b.created_at ? -1 : 1))[0];
+
+      if (latest?.score) {
+        // Match the sleep that ended on or after the recovery's date.
+        const recDate = latest.created_at.slice(0, 10);
+        const matchedSleep = sleeps
+          .filter((s) => !s.nap && s.score_state === "SCORED" && s.score)
+          .sort((a, b) => (a.end > b.end ? -1 : 1))
+          .find((s) => s.end.slice(0, 10) >= recDate);
+
+        liveWhoopBiometrics = {
+          recovery_score: Math.round(latest.score.recovery_score),
+          hrv_ms: Math.round(latest.score.hrv_rmssd_milli * 10) / 10,
+          resting_hr: Math.round(latest.score.resting_heart_rate),
+          sleep_hours: matchedSleep?.score
+            ? msToHours(
+                matchedSleep.score.stage_summary.total_light_sleep_time_milli +
+                matchedSleep.score.stage_summary.total_slow_wave_sleep_time_milli +
+                matchedSleep.score.stage_summary.total_rem_sleep_time_milli,
+              )
+            : null,
+          sleep_quality: matchedSleep?.score?.sleep_efficiency_percentage != null
+            ? Math.round(matchedSleep.score.sleep_efficiency_percentage / 10)
+            : null,
+        };
+
+        // Persist to DB so the coach and dashboard also see it.
+        await admin.from("daily_checkins").upsert(
+          { user_id: user.id, checkin_date: date, ...liveWhoopBiometrics },
+          { onConflict: "user_id,checkin_date", ignoreDuplicates: false },
+        );
+      }
+    } catch {
+      // Non-fatal — form just shows blank biometric fields.
+    }
+  }
+
   const checkinForForm: DailyCheckin | null = existingCheckin
-    ? existingCheckin
-    : whoopFallback
-      ? ({ ...whoopFallback, checkin_date: date } as unknown as DailyCheckin)
-      : null;
+    ?? (liveWhoopBiometrics
+      ? ({ ...liveWhoopBiometrics, checkin_date: date } as unknown as DailyCheckin)
+      : null);
 
   const whoopPrefilled =
-    whoopFallback != null ||
+    liveWhoopBiometrics != null ||
     (existingCheckin?.recovery_score != null && existingCheckin?.energy == null);
 
   return (
