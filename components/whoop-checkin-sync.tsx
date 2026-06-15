@@ -11,8 +11,11 @@ export function WhoopCheckinSync() {
 
   useEffect(() => {
     fetch("/api/whoop/sync", { method: "POST" })
-      .then((res) => {
-        if (res.ok) window.location.reload();
+      .then((res) => res.json())
+      .then((data: { synced?: number }) => {
+        // Only reload if we actually got new data — avoids infinite reload
+        // when WHOOP hasn't processed today's recovery yet.
+        if (data.synced && data.synced > 0) window.location.reload();
       })
       .catch(() => {/* non-fatal */});
   }, [router]);
