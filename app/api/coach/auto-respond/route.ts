@@ -90,16 +90,15 @@ export async function POST(request: Request) {
   if (!latestCheckin) {
     return json({ ok: true, skipped: "no check-ins yet" });
   }
-  // "Report yesterday, plan today": the decision for TODAY is built from the most
-  // recent COMPLETED-day results — normally yesterday's check-in. We don't wait
-  // for a check-in dated today; we plan today from the latest results we have,
-  // as long as they're recent enough (within ~2 days) to be relevant.
-  const ageDays =
-    (Date.parse(responseDate + "T00:00:00Z") -
-      Date.parse(latestCheckin.checkin_date + "T00:00:00Z")) /
-    86400000;
-  if (!(ageDays >= 0 && ageDays <= 2)) {
-    return json({ ok: true, skipped: "no recent check-in to plan from" });
+  // Plan ONLY from today's check-in. The coach must make its call off what the
+  // athlete actually submitted this morning — their readiness and the workout
+  // they picked for today — not a stale prior-day check-in (which led to
+  // predictions about the wrong session). If today's check-in isn't in yet,
+  // make no prediction and wait. The morning check-in is what triggers this
+  // route (it redirects to the chat with ?expect=brief), so once they submit,
+  // the next ping generates the brief off their fresh data.
+  if (latestCheckin.checkin_date !== responseDate) {
+    return json({ ok: true, skipped: "waiting for today's check-in" });
   }
 
   // 5. Recent chat (last ~7 days) so the decision reflects what the athlete
