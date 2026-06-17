@@ -72,12 +72,27 @@ export async function POST(request: Request) {
   ).map((m) => ({ role: m.role, body: m.body }));
 
   // 4. Gather the athlete's full context (service role — bypasses RLS).
-  const ctx = await buildCoachContext(userId, admin, responseDate, { recentMessages });
+  //    Pin the planning check-in to the target day so the draft reasons from what
+  //    the athlete submitted that morning, not the most recent row of any date.
+  const ctx = await buildCoachContext(userId, admin, responseDate, {
+    recentMessages,
+    latestCheckinDate: responseDate,
+  });
 
   // Nothing to reason about — don't waste an API call or invent data.
   if (!ctx.profile && ctx.recentCheckins.length === 0) {
     return bad(
       "This athlete has no profile or check-ins yet — there's nothing to draft from.",
+    );
+  }
+
+  // Require the target day's check-in. The coach must make its call off what the
+  // athlete actually submitted that morning (readiness + the workout they chose),
+  // never a stale prior-day check-in — that's what caused predictions about the
+  // wrong session. No check-in for this date → nothing to draft from.
+  if (!ctx.latestCheckin || ctx.latestCheckin.checkin_date !== responseDate) {
+    return bad(
+      `This athlete hasn't checked in for ${responseDate} yet — there's nothing submitted to predict from. Ask them to check in first.`,
     );
   }
 
