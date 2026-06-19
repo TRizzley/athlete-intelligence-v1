@@ -8,6 +8,7 @@ import { AutoCoachTrigger } from "@/components/auto-coach-trigger";
 import { PostWorkoutAckTrigger } from "@/components/post-workout-ack-trigger";
 import { PushOptIn } from "@/components/push-opt-in";
 import { WhoopSyncButton } from "@/components/whoop-sync-button";
+import { NutritionSummary } from "@/components/nutrition-summary";
 import type { DailyCheckin } from "@/lib/types";
 
 export const metadata = { title: "Today — The Coach" };
@@ -22,7 +23,7 @@ export default async function DashboardPage() {
   const supabase = await createClient();
   const today = await serverToday();
 
-  const [recordRes, checkinRes, morningBriefRes, workoutReviewRes, whoopTokenRes] =
+  const [recordRes, checkinRes, morningBriefRes, workoutReviewRes, whoopTokenRes, nutritionRes] =
     await Promise.all([
       supabase.from("users").select("full_name, push_token").eq("id", user.id).maybeSingle(),
       supabase
@@ -55,6 +56,11 @@ export default async function DashboardPage() {
         .select("expires_at")
         .eq("user_id", user.id)
         .maybeSingle(),
+      // Today's nutrition totals (aggregated by the DB helper)
+      supabase.rpc("get_daily_nutrition_totals", {
+        p_user_id: user.id,
+        p_date: today,
+      }),
     ]);
 
   const name = firstName(recordRes.data?.full_name);
@@ -81,6 +87,27 @@ export default async function DashboardPage() {
       : null;
   const morningBrief = morningBriefRes.data ?? null;
   const workoutReview = workoutReviewRes.data ?? null;
+
+  // Today's nutrition totals (RPC returns a single-row array)
+  const nutritionRow = (nutritionRes.data as
+    | {
+        total_calories: number;
+        total_protein_g: number;
+        total_carbs_g: number;
+        total_fat_g: number;
+        meal_count: number;
+      }[]
+    | null)?.[0] ?? null;
+  const nutritionTotals =
+    nutritionRow && Number(nutritionRow.meal_count) > 0
+      ? {
+          calories: Number(nutritionRow.total_calories),
+          protein_g: Number(nutritionRow.total_protein_g),
+          carbs_g: Number(nutritionRow.total_carbs_g),
+          fat_g: Number(nutritionRow.total_fat_g),
+          meal_count: Number(nutritionRow.meal_count),
+        }
+      : null;
 
   // WHOOP connection status
   const whoopToken = whoopTokenRes.data as { expires_at: string } | null;
@@ -136,21 +163,24 @@ export default async function DashboardPage() {
       {/* WHOOP biometrics card */}
       {whoopConnected && !whoopExpired && whoopBiometrics && (
         <div className="card mb-4">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-2">
-            WHOOP · Today
-          </p>
+          {/* Attribution per WHOOP brand guidelines */}
+          <div className="mb-3 flex items-center gap-1.5">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-2">Data by</span>
+            <span className="text-xs font-bold uppercase tracking-widest">WHOOP</span>
+          </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {whoopBiometrics.recovery_score != null && (
               <div>
                 <p className="text-xs text-muted">Recovery</p>
                 <p
-                  className={`text-xl font-semibold ${
-                    whoopBiometrics.recovery_score >= 67
-                      ? "text-green-500"
+                  className="text-xl font-semibold"
+                  style={{
+                    color: whoopBiometrics.recovery_score >= 67
+                      ? "#16EC06"
                       : whoopBiometrics.recovery_score >= 34
-                        ? "text-yellow-500"
-                        : "text-red-500"
-                  }`}
+                        ? "#FFDE00"
+                        : "#FF0026"
+                  }}
                 >
                   {whoopBiometrics.recovery_score}%
                 </p>
@@ -177,6 +207,26 @@ export default async function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Nutrition snapshot */}
+      <div className="card mb-4">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-2">
+            Nutrition · Today
+          </p>
+          <Link href="/nutrition" className="text-sm font-medium text-accent">
+            {nutritionTotals ? "Log more →" : "Log food →"}
+          </Link>
+        </div>
+        {nutritionTotals ? (
+          <NutritionSummary totals={nutritionTotals} compact />
+        ) : (
+          <p className="text-sm text-muted">
+            Nothing logged yet. Tell your coach what you ate — it reads your
+            fueling alongside recovery and training.
+          </p>
+        )}
+      </div>
 
       {/* Morning brief */}
       {morningBrief ? (
