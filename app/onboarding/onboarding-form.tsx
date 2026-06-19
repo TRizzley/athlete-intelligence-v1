@@ -140,8 +140,8 @@ export function OnboardingForm({
           <CheckPills name="devices" options={DEVICES} defaultValues={p?.devices ?? []} />
         </Field>
 
-        <Field label="Nutrition app" htmlFor="nutrition_app">
-          <input id="nutrition_app" name="nutrition_app" defaultValue={p?.nutrition_app ?? ""} className="input" placeholder="MyFitnessPal, Cronometer, none…" />
+        <Field label="Nutrition app" htmlFor="nutrition_app" hint="Or log food right in the app: the Nutrition tab reads plain English and folds the macros into your coach view.">
+          <input id="nutrition_app" name="nutrition_app" defaultValue={p?.nutrition_app ?? ""} className="input" placeholder="MyFitnessPal, Cronometer, log in-app, none" />
         </Field>
 
         <Field label="Injuries or limitations" htmlFor="injuries" hint="Anything your coach should know — old or active.">

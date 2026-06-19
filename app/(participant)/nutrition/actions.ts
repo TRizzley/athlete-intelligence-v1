@@ -59,6 +59,13 @@ export async function logFoodAction(
   if (!logDate || isNaN(Date.parse(logDate))) {
     return { success: false, error: "Invalid date." };
   }
+  // Reject dates in the future (allow +1 day of slack for timezone differences
+  // between the user's local "today" and the server's UTC date).
+  const tomorrow = new Date();
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  if (logDate > tomorrow.toISOString().slice(0, 10)) {
+    return { success: false, error: "Can't log food for a future date." };
+  }
   if (!["breakfast", "lunch", "dinner", "snack"].includes(mealType)) {
     return { success: false, error: "Invalid meal type." };
   }
