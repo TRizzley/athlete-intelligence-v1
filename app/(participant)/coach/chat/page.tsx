@@ -17,14 +17,19 @@ export default async function CoachChatPage({
   const user = await requireUser();
   const supabase = await createClient();
 
+  // Fetch the most RECENT 200 messages, then restore chronological order for
+  // display. Ordering ascending with a limit returns the OLDEST 200, so once a
+  // conversation passes 200 messages every new reply falls outside the window
+  // and never renders (the chat appears frozen with no error). Descending +
+  // reverse keeps the latest exchange always visible.
   const { data } = await supabase
     .from("coach_messages")
     .select("*")
     .eq("user_id", user.id)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(200);
 
-  const messages = (data as CoachMessage[]) ?? [];
+  const messages = ((data as CoachMessage[]) ?? []).slice().reverse();
 
   // Which feedback_prompt cards have already been answered, so the chat renders
   // them as "logged" instead of re-asking. Pull the response_ids the prompts
@@ -71,17 +76,4 @@ export default async function CoachChatPage({
           Share a screenshot with your coach
         </summary>
         <p className="mb-3 mt-1 text-xs text-muted">
-          Send a Whoop, Oura, Garmin, Apple, or nutrition screen — your coach reads
-          the numbers off it. You&apos;ll confirm what we read before it&apos;s used.
-        </p>
-        <UploadForm dateISO={today} />
-      </details>
-
-      <Chat
-        messages={messages}
-        expect={expect === "brief" || expect === "review" ? expect : null}
-        answeredResponseIds={answeredResponseIds}
-      />
-    </PageShell>
-  );
-}
+          Send a Whoop, Oura, Garmin, Apple, or nu
