@@ -14,7 +14,7 @@ Editing files on your computer changes **local dev only**. The phone / public si
 ## To see a change on your computer (local dev)
 
 ```powershell
-cd "C:\Users\tyler\Claude\The Operating System for Human Performance\Phase 1\web"
+cd "C:\Users\tyler\Claude\The Operating System for Human Performance\sprint-v1-web\web"
 npm run dev
 ```
 
@@ -34,7 +34,7 @@ Then hard-refresh the browser: **Ctrl+Shift+R**. (Note: PowerShell uses `Remove-
 Run these one at a time:
 
 ```powershell
-cd "C:\Users\tyler\Claude\The Operating System for Human Performance\Phase 1\web"
+cd "C:\Users\tyler\Claude\The Operating System for Human Performance\sprint-v1-web\web"
 ```
 ```powershell
 git status

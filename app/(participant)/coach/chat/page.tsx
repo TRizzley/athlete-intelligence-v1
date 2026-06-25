@@ -76,4 +76,17 @@ export default async function CoachChatPage({
           Share a screenshot with your coach
         </summary>
         <p className="mb-3 mt-1 text-xs text-muted">
-          Send a Whoop, Oura, Garmin, Apple, or nu
+          Send a Whoop, Oura, Garmin, Apple, or nutrition screen — your coach reads
+          the numbers off it. You&apos;ll confirm what we read before it&apos;s used.
+        </p>
+        <UploadForm dateISO={today} />
+      </details>
+
+      <Chat
+        messages={messages}
+        expect={expect === "brief" || expect === "review" ? expect : null}
+        answeredResponseIds={answeredResponseIds}
+      />
+    </PageShell>
+  );
+}
