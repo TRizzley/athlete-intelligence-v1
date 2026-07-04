@@ -71,7 +71,7 @@ export function PostWorkoutForm({
       {/* Training */}
       <section className="card space-y-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
-          Today's training
+          Today&apos;s training
         </h3>
         <Field label="Did you train?">
           <RadioCards

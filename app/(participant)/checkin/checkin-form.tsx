@@ -61,7 +61,7 @@ export function CheckinForm({
       <section className="card space-y-4">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
-            This morning's recovery &amp; sleep
+            This morning&apos;s recovery &amp; sleep
           </h3>
           {whoopPrefilled && (
             <span className="shrink-0 rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-medium text-accent">
@@ -70,8 +70,8 @@ export function CheckinForm({
           )}
         </div>
         <p className="-mt-1 text-xs text-muted-2">
-          The scores you woke up with today — last night's sleep and the recovery /
-          HRV / resting HR your wearable gave you this morning. Not yesterday's.
+          The scores you woke up with today — last night&apos;s sleep and the recovery /
+          HRV / resting HR your wearable gave you this morning. Not yesterday&apos;s.
         </p>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           <Field label="Bed time" htmlFor="bed_time" hint="When you went to bed">
@@ -101,10 +101,10 @@ export function CheckinForm({
       {/* Yesterday's macros (completed nutrition) */}
       <section className="card space-y-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
-          Yesterday's macros
+          Yesterday&apos;s macros
         </h3>
         <p className="-mt-1 text-xs text-muted-2">
-          Your completed nutrition from yesterday. You'll log today's training
+          Your completed nutrition from yesterday. You&apos;ll log today&apos;s training
           after you finish in the Post-workout check-in.
         </p>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">

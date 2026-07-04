@@ -32,7 +32,7 @@ export function CoachResponseView({
 
       {/* The recommendation is the hero — always visible. */}
       <div className="rounded-2xl border border-accent/40 bg-accent/10 p-5">
-        <div className="eyebrow mb-2 text-accent">Today's recommendation</div>
+        <div className="eyebrow mb-2 text-accent">Today&apos;s recommendation</div>
         <div className="text-lg font-medium leading-relaxed text-foreground">
           <Prose text={response.recommendation} />
         </div>

@@ -19,7 +19,7 @@ export default function PrivacyPage() {
         <section className="mb-8">
           <h2 className="text-lg font-semibold text-white mb-3">Overview</h2>
           <p className="text-gray-400 leading-relaxed">
-            {appName} ("we", "us", or "our") is a personal performance coaching app that
+            {appName} (&quot;we&quot;, &quot;us&quot;, or &quot;our&quot;) is a personal performance coaching app that
             aggregates data from your connected fitness devices and services to provide
             personalized training recommendations. This policy explains what data we collect,
             how we use it, and your rights around it.
@@ -54,7 +54,7 @@ export default function PrivacyPage() {
           <p className="text-gray-400 leading-relaxed">
             Your data is stored securely using Supabase, a SOC 2 Type II compliant database
             provider. OAuth tokens used to access your connected services are encrypted at rest.
-            We access your third-party data only to provide the app's core functionality.
+            We access your third-party data only to provide the app&apos;s core functionality.
           </p>
         </section>
 
@@ -63,7 +63,7 @@ export default function PrivacyPage() {
           <p className="text-gray-400 leading-relaxed">
             When you connect a third-party service (e.g. WHOOP), you authorize us to
             access your data from that service on your behalf using OAuth 2.0. You can revoke
-            this access at any time either from within the app or from the connected service's
+            this access at any time either from within the app or from the connected service&apos;s
             own settings.
           </p>
         </section>

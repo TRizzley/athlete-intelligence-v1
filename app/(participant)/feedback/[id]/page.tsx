@@ -43,7 +43,7 @@ export default async function FeedbackPage({
         </h1>
         <p className="mt-1.5 text-sm text-muted">
           For the decision from {formatDateLong(r.response_date)}. Be brutally
-          honest — this is exactly what we're testing.
+          honest — this is exactly what we&apos;re testing.
         </p>
       </div>
 
@@ -62,7 +62,7 @@ export default async function FeedbackPage({
               <Prose text={r.prediction} />
             </div>
             <p className="mt-2 text-[11px] text-muted-2">
-              When you rate "Did the prediction come true?" below, use this.
+              When you rate &quot;Did the prediction come true?&quot; below, use this.
             </p>
           </div>
         ) : null}

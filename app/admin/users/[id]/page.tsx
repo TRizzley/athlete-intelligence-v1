@@ -187,7 +187,7 @@ export default async function AthleteReviewPage({
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-2">
-                  Write today's decision
+                  Write today&apos;s decision
                 </h2>
                 <p className="text-xs text-muted">
                   Conclusions first. Specific, non-obvious, personal — or let
@@ -430,7 +430,7 @@ export default async function AthleteReviewPage({
                 ) : null}
               </div>
             ) : (
-              <p className="text-sm text-muted-2">Athlete hasn't completed onboarding.</p>
+              <p className="text-sm text-muted-2">Athlete hasn&apos;t completed onboarding.</p>
             )}
           </section>
 

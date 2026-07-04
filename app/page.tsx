@@ -115,15 +115,15 @@ export default async function LandingPage() {
       {/* The honest frame */}
       <section className="border-t border-border py-14">
         <div className="card bg-surface-2">
-          <div className="eyebrow mb-2">What we're testing</div>
+          <div className="eyebrow mb-2">What we&apos;re testing</div>
           <p className="text-pretty text-lg leading-relaxed text-foreground">
             “Damn, it gets me.”
           </p>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-            That's the whole experiment. After each coaching response you'll tell us
+            That&apos;s the whole experiment. After each coaching response you&apos;ll tell us
             whether it felt accurate, whether it felt personal, whether the
             recommendation was useful, whether the prediction came true — and
-            whether you'd pay to keep it. Your honest answers decide what we build next.
+            whether you&apos;d pay to keep it. Your honest answers decide what we build next.
           </p>
         </div>
       </section>

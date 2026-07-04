@@ -155,9 +155,9 @@ export default async function CheckinPage() {
         <div className="eyebrow mb-1.5">Morning check-in</div>
         <h1 className="text-2xl font-semibold tracking-tight">How did you wake up?</h1>
         <p className="mt-1.5 text-sm text-muted">
-          Do this in the morning: how you slept last night, yesterday's completed
+          Do this in the morning: how you slept last night, yesterday&apos;s completed
           fuel, and how you feel right now — anything blank is fine. When you submit,
-          your coach reads it (with your screenshots) and opens today's conversation
+          your coach reads it (with your screenshots) and opens today&apos;s conversation
           with a plan and a prediction — you can reply right there.
         </p>
       </div>

@@ -118,21 +118,29 @@ export async function GET(request: Request) {
       path: "/checkin",
     });
 
+    // Mark reminded only when the push actually went out, or when the token is
+    // dead (nothing can succeed today). A transient APNs failure leaves the
+    // athlete unmarked so a later tick within the reminder hour retries them.
+    let markReminded = false;
+
     if ("ok" in r && r.ok) {
       sent += 1;
+      markReminded = true;
     } else if ("ok" in r && !r.ok) {
       errors.push(`${r.status ?? ""} ${r.reason ?? ""}`.trim());
       // Clear a dead token so we stop trying it (the app re-registers on next open).
       if (r.status === 410 || r.reason === "Unregistered" || r.reason === "BadDeviceToken") {
         await admin.from("users").update({ push_token: null }).eq("id", id);
+        markReminded = true;
       }
     }
 
-    // Mark reminded today so later ticks skip this athlete.
-    await admin
-      .from("athlete_profiles")
-      .update({ morning_reminder_date: localDate })
-      .eq("user_id", id);
+    if (markReminded) {
+      await admin
+        .from("athlete_profiles")
+        .update({ morning_reminder_date: localDate })
+        .eq("user_id", id);
+    }
   }
 
   return NextResponse.json({ ok: true, localDate, hour, sent, errors });

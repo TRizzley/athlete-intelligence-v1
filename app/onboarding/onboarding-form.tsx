@@ -183,7 +183,7 @@ export function OnboardingForm({
         </div>
 
         <div>
-          <span className="label">When you're run down, you tend to…</span>
+          <span className="label">When you&apos;re run down, you tend to…</span>
           <div className="grid gap-2 sm:grid-cols-3">
             {FATIGUE_TENDENCIES.map((t) => (
               <label key={t.value} className="cursor-pointer">
