@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { distillMemoryFromCheckin } from "@/lib/coach-memory";
@@ -116,15 +117,15 @@ export async function saveCheckin(
   console.log(`[checkin] saved for user=${user.id} date=${checkinDate}`);
 
   // Background: distill any durable facts from the check-in's free-text fields
-  // into memory notes. Non-blocking — we fire and don't await so the redirect
-  // happens immediately. Uses admin client (memory notes are RLS-restricted to
-  // admin writes). Failure is silently swallowed inside distillMemoryFromCheckin.
+  // into memory notes. Non-blocking — runs via after() so the redirect happens
+  // immediately but the work survives the response (a bare fire-and-forget
+  // promise can be killed when the serverless function freezes). Uses admin
+  // client (memory notes are RLS-restricted to admin writes).
   const openComments = payload.open_comments ?? null;
   const painNote = payload.pain_injury_note ?? null;
   if (openComments || painNote) {
     const admin = createAdminClient();
-    // Fetch existing notes then distill — run in background, don't block.
-    void (async () => {
+    after(async () => {
       try {
         const { data: notesData } = await admin
           .from("athlete_memory_notes")
@@ -152,7 +153,7 @@ export async function saveCheckin(
       } catch {
         // Never surface distillation errors to the athlete
       }
-    })();
+    });
   }
 
   revalidatePath("/dashboard");

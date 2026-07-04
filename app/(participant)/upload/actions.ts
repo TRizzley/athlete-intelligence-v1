@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
   extractFromScreenshot,
@@ -110,16 +111,21 @@ export async function uploadScreenshot(
     // Read the numbers off the screenshot and store them as a PENDING reading.
     // They are NOT written into the check-in here — the athlete reviews and
     // confirms first (see applyScreenshotReading), so a misread can't silently
-    // reach the coach. Fire-and-forget: we don't await so the upload returns
-    // immediately once storage + row insert succeed. runOcr records its own
+    // reach the coach. Runs via after() so the upload responds immediately but
+    // the serverless function isn't frozen mid-OCR (a bare `void` promise can
+    // be killed when the response is sent). runOcr records its own
     // status/errors in the DB (parse_status, parse_error) and never throws.
-    void runOcr(supabase, {
-      screenshotId: inserted.id as string,
-      source: source as ScreenshotSource,
-      note,
-      bytes,
-      mimeType: file.type,
-    });
+    const screenshotId = inserted.id as string;
+    const mimeType = file.type;
+    after(() =>
+      runOcr(supabase, {
+        screenshotId,
+        source: source as ScreenshotSource,
+        note,
+        bytes,
+        mimeType,
+      }),
+    );
 
     succeeded += 1;
   }
@@ -362,13 +368,17 @@ export async function retryOcr(screenshotId: string): Promise<FormState> {
     .update({ parse_status: "pending", parse_error: null, parsed_json: null, applied_at: null })
     .eq("id", screenshotId);
 
-  void runOcr(supabase, {
-    screenshotId,
-    source: s.source as ScreenshotSource,
-    note: s.note,
-    bytes,
-    mimeType,
-  });
+  // after() keeps the OCR alive past the response instead of a killable
+  // fire-and-forget promise (which left rows stuck in "processing").
+  after(() =>
+    runOcr(supabase, {
+      screenshotId,
+      source: s.source as ScreenshotSource,
+      note: s.note,
+      bytes,
+      mimeType,
+    }),
+  );
 
   revalidatePath("/upload");
   return { error: null, ok: true, message: "Re-reading the screenshot — refresh in a moment." };
