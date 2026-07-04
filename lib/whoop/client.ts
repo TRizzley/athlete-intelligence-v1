@@ -1,7 +1,7 @@
 // WHOOP API client — OAuth helpers, token refresh, and data fetching.
-// Server-only. Modeled after strava.ts.
+// Server-only.
 
-import type { createAdminClient } from "./supabase/admin";
+import type { createAdminClient } from "../supabase/admin";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -126,6 +126,20 @@ export interface WhoopBodyMeasurement {
   max_heart_rate: number;
 }
 
+// ── Errors ────────────────────────────────────────────────────────────────────
+
+// Error carrying the WHOOP HTTP status so callers can classify it:
+// 429/5xx are transient (retriable), 401/403 are terminal (auth is dead).
+export class WhoopApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = "WhoopApiError";
+  }
+}
+
 // ── Token management ──────────────────────────────────────────────────────────
 
 interface TokenResponse {
@@ -152,7 +166,10 @@ export async function refreshWhoopToken(
   });
 
   if (!res.ok) {
-    throw new Error(`WHOOP token refresh failed: ${res.status} ${await res.text()}`);
+    throw new WhoopApiError(
+      `WHOOP token refresh failed: ${res.status} ${await res.text()}`,
+      res.status,
+    );
   }
 
   const data = (await res.json()) as TokenResponse;
@@ -167,8 +184,9 @@ export async function refreshWhoopToken(
 // Handles the WHOOP single-use refresh token race condition: if multiple
 // concurrent requests all try to refresh the same token, only one wins.
 // Losers re-read the DB to pick up the winner's fresh token.
-// If refresh genuinely fails (revoked/expired), the row is deleted so the
-// dashboard shows "Connect WHOOP" instead of silently failing.
+// On refresh failure the token row is PRESERVED — a transient WHOOP outage
+// must never force the athlete to reconnect. The error propagates so the
+// caller logs it and skips this sync cycle.
 export async function getValidWhoopToken(
   tokenRow: WhoopTokenRow,
   admin: AdminClient,
@@ -203,10 +221,14 @@ export async function getValidWhoopToken(
       return latestRow.access_token;
     }
 
-    // Genuinely dead (user revoked access or refresh token expired).
-    // Delete the row so the user is prompted to reconnect on the dashboard.
-    await admin.from("whoop_tokens").delete().eq("id", tokenRow.id);
-    throw new Error(`WHOOP token refresh failed; user must reconnect. Cause: ${refreshErr}`);
+    // Refresh failed and nobody else refreshed either. Keep the row (deleting
+    // it on a transient failure would force a pointless reconnect) and let the
+    // caller skip this sync cycle.
+    console.error(
+      `WHOOP token refresh failed for user ${tokenRow.user_id}; row preserved, skipping this sync cycle.`,
+      refreshErr,
+    );
+    throw new Error(`WHOOP token refresh failed; skipping sync. Cause: ${refreshErr}`);
   }
 }
 
@@ -220,7 +242,10 @@ async function whoopGet<T>(accessToken: string, path: string): Promise<T> {
   });
 
   if (!res.ok) {
-    throw new Error(`WHOOP API error ${path}: ${res.status} ${await res.text()}`);
+    throw new WhoopApiError(
+      `WHOOP API error ${path}: ${res.status} ${await res.text()}`,
+      res.status,
+    );
   }
 
   return res.json() as Promise<T>;
