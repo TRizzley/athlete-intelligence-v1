@@ -46,6 +46,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // APNS reminders stubbed out for Phase 1. Restore by setting APNS_ENABLED=true
+  // and providing keys (APNS_KEY_ID, APNS_KEY_P8) when ready.
+  if (process.env.APNS_ENABLED !== "true") {
+    return NextResponse.json({ ok: true, message: "APNS reminders disabled" });
+  }
+
   const tz = process.env.REMINDER_TIMEZONE || "America/New_York";
   const localDate = todayInTz(tz);
   const hour = localHour(tz);

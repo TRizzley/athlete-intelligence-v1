@@ -24,7 +24,7 @@ import type {
   UserFeedback,
   AthleteMemoryNote,
 } from "./types";
-import type { CoachContext, ChatTurn, WorkoutLogBrief, WorkoutDayBrief, WorkoutExerciseBrief, DailyNutritionSummary } from "./coach-types";
+import type { CoachContext, ChatTurn, WorkoutLogBrief, WorkoutDayBrief, WorkoutExerciseBrief } from "./coach-types";
 import { embedText } from "./embeddings";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -228,61 +228,6 @@ export async function buildCoachContext(
     }
   }
 
-  // Nutrition logs — last 7 days of logged food, aggregated per day. This is
-  // the authoritative fueling record (the macros here are what sync into the
-  // check-ins above) plus meal_count and fiber, which check-ins don't carry.
-  let recentNutritionLogs: DailyNutritionSummary[] = [];
-  {
-    const since = new Date(today + "T00:00:00Z");
-    since.setUTCDate(since.getUTCDate() - 6); // 7-day inclusive window
-    const sinceISO = since.toISOString().slice(0, 10);
-
-    const { data: nutritionRows } = await admin
-      .from("nutrition_logs")
-      .select("log_date, calories, protein_g, carbs_g, fat_g, fiber_g")
-      .eq("user_id", userId)
-      .gte("log_date", sinceISO)
-      .lte("log_date", today);
-
-    const byDay = new Map<string, DailyNutritionSummary>();
-    (nutritionRows as {
-      log_date: string;
-      calories: number | null;
-      protein_g: number | null;
-      carbs_g: number | null;
-      fat_g: number | null;
-      fiber_g: number | null;
-    }[] ?? []).forEach((r) => {
-      const d = byDay.get(r.log_date) ?? {
-        date: r.log_date,
-        calories: 0,
-        protein_g: 0,
-        carbs_g: 0,
-        fat_g: 0,
-        fiber_g: 0,
-        meal_count: 0,
-      };
-      d.calories += Number(r.calories) || 0;
-      d.protein_g += Number(r.protein_g) || 0;
-      d.carbs_g += Number(r.carbs_g) || 0;
-      d.fat_g += Number(r.fat_g) || 0;
-      d.fiber_g += Number(r.fiber_g) || 0;
-      d.meal_count += 1;
-      byDay.set(r.log_date, d);
-    });
-
-    recentNutritionLogs = Array.from(byDay.values())
-      .map((d) => ({
-        ...d,
-        calories: Math.round(d.calories),
-        protein_g: Math.round(d.protein_g),
-        carbs_g: Math.round(d.carbs_g),
-        fat_g: Math.round(d.fat_g),
-        fiber_g: Math.round(d.fiber_g),
-      }))
-      .sort((a, b) => (a.date > b.date ? -1 : 1)); // newest first
-  }
-
   // If a specific date is requested, find that row first (post-workout-ack
   // needs today's training fields); otherwise use the most recent row.
   const latestCheckin = latestCheckinDate
@@ -336,7 +281,6 @@ export async function buildCoachContext(
     predictions: (predictionsRes.data as PredictionWithOutcome[]) ?? [],
     feedback: (feedbackRes.data as UserFeedback[]) ?? [],
     recentWorkouts,
-    recentNutritionLogs,
     recentMessages,
     workoutDays,
   };

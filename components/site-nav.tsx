@@ -9,7 +9,6 @@ const LINKS = [
   { href: "/dashboard", label: "Today" },
   { href: "/workout", label: "Workout" },
   { href: "/post-workout", label: "Post-workout" },
-  { href: "/nutrition", label: "Nutrition" },
   { href: "/coach", label: "Coach" },
 ];
 

@@ -8,7 +8,6 @@ import { AutoCoachTrigger } from "@/components/auto-coach-trigger";
 import { PostWorkoutAckTrigger } from "@/components/post-workout-ack-trigger";
 import { PushOptIn } from "@/components/push-opt-in";
 import { WhoopSyncButton } from "@/components/whoop-sync-button";
-import { NutritionSummary } from "@/components/nutrition-summary";
 import type { DailyCheckin } from "@/lib/types";
 
 export const metadata = { title: "Today — The Coach" };
@@ -23,7 +22,7 @@ export default async function DashboardPage() {
   const supabase = await createClient();
   const today = await serverToday();
 
-  const [recordRes, checkinRes, morningBriefRes, workoutReviewRes, whoopTokenRes, nutritionRes] =
+  const [recordRes, checkinRes, morningBriefRes, workoutReviewRes, whoopTokenRes] =
     await Promise.all([
       supabase.from("users").select("full_name, push_token").eq("id", user.id).maybeSingle(),
       supabase
@@ -56,11 +55,6 @@ export default async function DashboardPage() {
         .select("expires_at")
         .eq("user_id", user.id)
         .maybeSingle(),
-      // Today's nutrition totals (aggregated by the DB helper)
-      supabase.rpc("get_daily_nutrition_totals", {
-        p_user_id: user.id,
-        p_date: today,
-      }),
     ]);
 
   const name = firstName(recordRes.data?.full_name);
@@ -87,27 +81,6 @@ export default async function DashboardPage() {
       : null;
   const morningBrief = morningBriefRes.data ?? null;
   const workoutReview = workoutReviewRes.data ?? null;
-
-  // Today's nutrition totals (RPC returns a single-row array)
-  const nutritionRow = (nutritionRes.data as
-    | {
-        total_calories: number;
-        total_protein_g: number;
-        total_carbs_g: number;
-        total_fat_g: number;
-        meal_count: number;
-      }[]
-    | null)?.[0] ?? null;
-  const nutritionTotals =
-    nutritionRow && Number(nutritionRow.meal_count) > 0
-      ? {
-          calories: Number(nutritionRow.total_calories),
-          protein_g: Number(nutritionRow.total_protein_g),
-          carbs_g: Number(nutritionRow.total_carbs_g),
-          fat_g: Number(nutritionRow.total_fat_g),
-          meal_count: Number(nutritionRow.meal_count),
-        }
-      : null;
 
   // WHOOP connection status
   const whoopToken = whoopTokenRes.data as { expires_at: string } | null;
@@ -207,26 +180,6 @@ export default async function DashboardPage() {
           </div>
         </div>
       )}
-
-      {/* Nutrition snapshot */}
-      <div className="card mb-4">
-        <div className="mb-3 flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-2">
-            Nutrition · Today
-          </p>
-          <Link href="/nutrition" className="text-sm font-medium text-accent">
-            {nutritionTotals ? "Log more →" : "Log food →"}
-          </Link>
-        </div>
-        {nutritionTotals ? (
-          <NutritionSummary totals={nutritionTotals} compact />
-        ) : (
-          <p className="text-sm text-muted">
-            Nothing logged yet. Tell your coach what you ate — it reads your
-            fueling alongside recovery and training.
-          </p>
-        )}
-      </div>
 
       {/* Morning brief */}
       {morningBrief ? (

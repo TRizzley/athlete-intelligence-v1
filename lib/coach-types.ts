@@ -41,19 +41,6 @@ export interface ChatTurn {
   body: string;
 }
 
-// One day of logged-food totals, aggregated from nutrition_logs. This is the
-// authoritative fueling record (source of the macros that sync into check-ins),
-// and it carries detail check-ins don't: how many items were logged and fiber.
-export interface DailyNutritionSummary {
-  date: string; // YYYY-MM-DD
-  calories: number;
-  protein_g: number;
-  carbs_g: number;
-  fat_g: number;
-  fiber_g: number;
-  meal_count: number;
-}
-
 export interface WorkoutExerciseBrief {
   id: string;
   name: string;
@@ -84,7 +71,6 @@ export interface CoachContext {
   predictions: import("./types").PredictionWithOutcome[];
   feedback: import("./types").UserFeedback[];
   recentWorkouts?: WorkoutLogBrief[]; // logged sessions w/ per-set weight+reps
-  recentNutritionLogs?: DailyNutritionSummary[]; // last 7 days of logged food, newest first
   recentMessages?: ChatTurn[]; // recent coach<->athlete chat (oldest first)
   programContext?: ProgramContext; // absent for brand-new athletes
   workoutDays?: WorkoutDayBrief[]; // saved program structure (days + exercises with IDs)

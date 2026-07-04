@@ -33,8 +33,6 @@ export default function PrivacyPage() {
           </p>
           <ul className="list-disc list-inside text-gray-400 space-y-1 leading-relaxed">
             <li>WHOOP: recovery scores, sleep data, strain, heart rate, and workouts</li>
-            <li>Strava: workout activities, distance, pace, and heart rate</li>
-            <li>Nutritionix: food logs and nutritional data you enter manually</li>
             <li>Account information: your name and email address used to create your account</li>
           </ul>
         </section>
@@ -63,7 +61,7 @@ export default function PrivacyPage() {
         <section className="mb-8">
           <h2 className="text-lg font-semibold text-white mb-3">Third-Party Services</h2>
           <p className="text-gray-400 leading-relaxed">
-            When you connect a third-party service (e.g. WHOOP, Strava), you authorize us to
+            When you connect a third-party service (e.g. WHOOP), you authorize us to
             access your data from that service on your behalf using OAuth 2.0. You can revoke
             this access at any time either from within the app or from the connected service's
             own settings.

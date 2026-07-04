@@ -335,21 +335,6 @@ export function buildContextText(ctx: CoachContext, closing?: string): string {
     );
   }
 
-  if (ctx.recentNutritionLogs && ctx.recentNutritionLogs.length > 0) {
-    const lines = ctx.recentNutritionLogs.map((n) => {
-      const cal = n.calories.toLocaleString();
-      return (
-        `   • ${n.date}: ${cal} kcal · ${n.protein_g}g protein · ${n.carbs_g}g carbs · ` +
-        `${n.fat_g}g fat · ${n.fiber_g}g fiber (${n.meal_count} item${n.meal_count === 1 ? "" : "s"})`
-      );
-    });
-    parts.push(
-      "NUTRITION LOG (last 7 days, from food the athlete logged — this is the authoritative fueling record and the source of the calorie/macro numbers in the check-ins above):\n" +
-        lines.join("\n") +
-        "\nUse this to spot fueling patterns that drive performance: protein low on training days, a calorie deficit during a hard week, fiber consistently low, or days with no log at all (gaps mean they didn't track, not that they didn't eat). Tie fueling to today's recommendation with specific numbers when it matters.",
-    );
-  }
-
   if (ctx.workoutDays && ctx.workoutDays.length > 0) {
     const days = ctx.workoutDays.map((d) => ({
       id: d.id,
