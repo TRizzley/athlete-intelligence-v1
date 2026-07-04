@@ -1,5 +1,11 @@
 # SMS Check-in Reminders — Setup
 
+> **DEPRECATED (2026-07):** This document describes a Twilio SMS flow that was
+> never built — no Twilio code exists in this repo. Check-in reminders are
+> implemented as APNs push notifications instead (`app/api/cron/reminders/`,
+> `lib/push.ts`), currently gated off behind `APNS_ENABLED=true`. Kept only as
+> a historical reference; do not follow these steps.
+
 The code is built. To turn on the daily reminder texts, do this once.
 
 ## 1. Create a Twilio account & number
