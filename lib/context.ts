@@ -24,7 +24,7 @@ import type {
   UserFeedback,
   AthleteMemoryNote,
 } from "./types";
-import type { CoachContext, ChatTurn, WorkoutLogBrief, WorkoutDayBrief, WorkoutExerciseBrief } from "./coach-types";
+import type { CoachContext, ChatTurn, WorkoutLogBrief, WorkoutDayBrief, WorkoutExerciseBrief, SelfEvalBrief } from "./coach-types";
 import { embedText } from "./embeddings";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -42,6 +42,8 @@ export interface ContextOptions {
   feedbackLimit?: number;
   /** How many workout sessions to load (per-set logs follow). Default 5. */
   workoutSessionLimit?: number;
+  /** How many post-workout self-evals to load (newest first). Default 15. */
+  selfEvalLimit?: number;
   /**
    * If provided, `latestCheckin` in the returned context will be the row
    * matching this date (falling back to checkins[0] if not found). Used by
@@ -71,6 +73,7 @@ export async function buildCoachContext(
     predictionLimit = 12,
     feedbackLimit = 12,
     workoutSessionLimit = 5,
+    selfEvalLimit = 15,
     latestCheckinDate,
     recentMessages,
   } = opts;
@@ -84,6 +87,7 @@ export async function buildCoachContext(
     responsesRes,
     predictionsRes,
     feedbackRes,
+    selfEvalsRes,
   ] = await Promise.all([
     admin.from("users").select("full_name, email").eq("id", userId).maybeSingle(),
     admin.from("athlete_profiles").select("*").eq("user_id", userId).maybeSingle(),
@@ -112,6 +116,12 @@ export async function buildCoachContext(
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(feedbackLimit),
+    admin
+      .from("workout_self_evals")
+      .select("rpe, feedback, workout_sessions(session_date, day_name)")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(selfEvalLimit),
   ]);
 
   // Screenshots are optional — milestone-reports skips them to reduce noise.
@@ -228,6 +238,30 @@ export async function buildCoachContext(
     }
   }
 
+  // Post-workout self-evals, joined to their session for date/day-name. The
+  // unique workout_id FK makes the embed one-to-one, but PostgREST can still
+  // hand back an array — normalize either shape.
+  const selfEvals: SelfEvalBrief[] = (
+    (selfEvalsRes.data as {
+      rpe: number;
+      feedback: string | null;
+      workout_sessions:
+        | { session_date: string; day_name: string | null }
+        | { session_date: string; day_name: string | null }[]
+        | null;
+    }[]) ?? []
+  ).map((row) => {
+    const session = Array.isArray(row.workout_sessions)
+      ? row.workout_sessions[0] ?? null
+      : row.workout_sessions;
+    return {
+      workout_date: session?.session_date ?? "",
+      day_name: session?.day_name ?? null,
+      rpe: row.rpe,
+      feedback: row.feedback,
+    };
+  });
+
   // If a specific date is requested, find that row first (post-workout-ack
   // needs today's training fields); otherwise use the most recent row.
   const latestCheckin = latestCheckinDate
@@ -281,6 +315,7 @@ export async function buildCoachContext(
     predictions: (predictionsRes.data as PredictionWithOutcome[]) ?? [],
     feedback: (feedbackRes.data as UserFeedback[]) ?? [],
     recentWorkouts,
+    selfEvals,
     recentMessages,
     workoutDays,
   };

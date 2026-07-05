@@ -1,7 +1,7 @@
 # Sprint Phase 2 — Milestone A: Self-Evaluation System
 
 **Date:** 2026-07-04
-**Status:** A1 built (awaiting checkpoint approval) · A2 pending · A3 pending
+**Status:** A1 committed (21611b3) · A2 built (awaiting checkpoint approval) · A3 pending
 
 ## Goal
 
@@ -24,12 +24,36 @@ Signal): pure self-eval data.
 - **Tests:** `app/api/athlete/workouts/__tests__/eval.test.ts` (vitest,
   mocks `@/lib/supabase/server`).
 
-### A2 — Coach reads evals
+### A2 — Coach reads evals (built)
 
-Coach context/prompt layer (`lib/context.ts` / `lib/coach-*.ts`) pulls the
-athlete's recent self-evals (and existing `daily_checkins.workout_intensity`)
-into the coach's context so responses reflect self-reported effort and
-trends. Details planned at A2 kickoff.
+Self-evals flow into every AI coaching module via the shared context
+pipeline:
+
+- `lib/coach-types.ts` — `SelfEvalBrief` (workout_date, day_name, rpe,
+  feedback) + optional `selfEvals` on `CoachContext`.
+- `lib/context.ts` — `buildCoachContext` fetches the newest 15 evals
+  (`selfEvalLimit` option) joined to `workout_sessions` for date/day-name,
+  in the existing parallel query batch (service-role client, like all
+  context reads).
+- `lib/coach-context.ts` — `buildContextText` renders an "ATHLETE
+  SELF-EVALS" section directly after LOGGED WORKOUTS so evals line up with
+  sessions by date. The section tells the coach to read RPE alongside
+  `workout_intensity_1to10` from check-ins (same scale, day level), to read
+  rising RPE at constant load as fatigue / falling as adaptation, and to
+  echo the athlete's own words for personalization.
+- `lib/coach-evals.ts` — pure `summarizeSelfEvals(evals)` derives
+  deterministic stats (avg RPE over last 5, newest feedback, count, trend
+  from the two most recent) so the AI never does arithmetic over raw rows
+  (same reasoning as `coach-trends.ts`). Rendered as a SUMMARY line at the
+  top of the self-evals section. No DB access — it summarizes the evals
+  `buildCoachContext` already fetched.
+- Tests: `lib/__tests__/coach-evals.test.ts` (9 pure-function tests) and
+  `lib/__tests__/coach-context.test.ts` (rendering, summary line, ordering,
+  null-feedback handling, section placement).
+
+Because every coach surface (morning brief, chat, workout review,
+milestone reports) builds context through `buildCoachContext` →
+`buildContextText`, no per-route changes were needed.
 
 ### A3 — End-to-end checkpoint
 

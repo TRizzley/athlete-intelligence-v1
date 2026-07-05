@@ -28,6 +28,15 @@ export interface WorkoutLogBrief {
   }[];
 }
 
+// The athlete's post-workout self-eval (RPE + their own words), joined to the
+// session it rates so the AI can line it up with the logged workout by date.
+export interface SelfEvalBrief {
+  workout_date: string;
+  day_name: string | null;
+  rpe: number; // 1-10 Rate of Perceived Exertion
+  feedback: string | null; // their one-liner ("felt strong", "hit plateau")
+}
+
 // Where the athlete is in their program. Gives temporal context the AI lacks.
 export interface ProgramContext {
   dayNumber: number;     // calendar days since first check-in (1-indexed)
@@ -71,6 +80,7 @@ export interface CoachContext {
   predictions: import("./types").PredictionWithOutcome[];
   feedback: import("./types").UserFeedback[];
   recentWorkouts?: WorkoutLogBrief[]; // logged sessions w/ per-set weight+reps
+  selfEvals?: SelfEvalBrief[]; // post-workout RPE + feedback, newest first
   recentMessages?: ChatTurn[]; // recent coach<->athlete chat (oldest first)
   programContext?: ProgramContext; // absent for brand-new athletes
   workoutDays?: WorkoutDayBrief[]; // saved program structure (days + exercises with IDs)

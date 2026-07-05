@@ -12,6 +12,7 @@ import type {
   Confidence,
 } from "./types";
 import type { CoachContext } from "./coach-types";
+import { summarizeSelfEvals } from "./coach-evals";
 
 // ── Shared utils ──────────────────────────────────────────────────────────────
 
@@ -332,6 +333,32 @@ export function buildContextText(ctx: CoachContext, closing?: string): string {
     parts.push(
       "LOGGED WORKOUTS (most recent first — actual weights and reps per set; use these to judge progression, fatigue, and whether load is moving the right way):\n" +
         JSON.stringify(workouts, null, 2),
+    );
+  }
+
+  if (ctx.selfEvals && ctx.selfEvals.length > 0) {
+    const summary = summarizeSelfEvals(ctx.selfEvals);
+    const evals = ctx.selfEvals.map((e) =>
+      compact({
+        workout_date: e.workout_date,
+        day: e.day_name,
+        rpe_1to10: e.rpe,
+        their_words: e.feedback,
+      }),
+    );
+    parts.push(
+      "ATHLETE SELF-EVALS (most recent first — the athlete's own post-workout rating: RPE 1-10 plus their words, matching the logged workouts above by date. workout_intensity_1to10 in the check-ins is the same scale captured at day level; read them together. The summary is pre-computed: avg_rpe is over the last 5 evals, rpe_trend compares the two most recent. Rising RPE at the same loads = accumulating fatigue, falling RPE at the same loads = adaptation. Their words are the highest-signal personalization you have — echo them back when relevant):\n" +
+        "SUMMARY: " +
+        JSON.stringify(
+          compact({
+            avg_rpe_last_5: summary.avgRPE,
+            rpe_trend: summary.rpeTrend,
+            evals_logged: summary.rpeCount,
+            latest_words: summary.recentFeedback,
+          }),
+        ) +
+        "\n" +
+        JSON.stringify(evals, null, 2),
     );
   }
 
