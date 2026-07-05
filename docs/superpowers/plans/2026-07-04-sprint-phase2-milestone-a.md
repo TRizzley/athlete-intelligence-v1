@@ -1,7 +1,7 @@
 # Sprint Phase 2 — Milestone A: Self-Evaluation System
 
 **Date:** 2026-07-04
-**Status:** A1 committed (21611b3) · A2 built (awaiting checkpoint approval) · A3 pending
+**Status:** A1 committed (21611b3) · A2 committed (723bf17) · A3 verified 2026-07-04 (one manual step open, see below)
 
 ## Goal
 
@@ -55,11 +55,29 @@ Because every coach surface (morning brief, chat, workout review,
 milestone reports) builds context through `buildCoachContext` →
 `buildContextText`, no per-route changes were needed.
 
-### A3 — End-to-end checkpoint
+### A3 — End-to-end checkpoint (verified 2026-07-04)
 
-Full loop verification: athlete logs a workout → submits self-eval → coach
-response demonstrably uses the eval history. Manual e2e pass plus any gaps
-found in A1/A2.
+Automated verification, all against the live project (`dodfgknznxripagqncpd`):
+
+1. **PostgREST embed join** — the exact context-fetch query
+   (`workout_self_evals` with embedded `workout_sessions(session_date,
+   day_name)`) returns HTTP 200 via REST with the service key, confirming
+   the relationship resolves (this was the one untested seam in A2, which
+   unit tests only exercised through mocks).
+2. **DB behavior** — inside a rolled-back transaction (forced-exception DO
+   block; zero rows persisted, confirmed empty after): double submission
+   upserts to one row with the newer RPE; RPE 11 rejected with SQLSTATE
+   23514 (check_violation); under the `authenticated` role the owner sees
+   their eval and a stranger sees nothing (RLS live, not just declared).
+3. **Endpoint runtime** — against `npm run dev`: unauthenticated POST →
+   401, malformed workoutId → 400, GET → 405. Confirms the Next 15
+   promise-params route works at runtime.
+
+**Open manual step:** the full human-visible loop — sign in as an athlete,
+submit an eval from the UI (UI form is future work; until then, POST via a
+signed-in session), and confirm a generated coach response references the
+eval (SUMMARY line + rows land in the context brief automatically). Needs
+real credentials + an Anthropic call, so it's a human checkpoint.
 
 ## Schema (as built)
 
