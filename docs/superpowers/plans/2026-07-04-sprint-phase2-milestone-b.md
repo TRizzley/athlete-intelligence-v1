@@ -1,7 +1,7 @@
 # Sprint Phase 2 — Milestone B: Workout-Type Patterns & Coaching Focus
 
 **Date:** 2026-07-04
-**Status:** B1 committed (fc7f73f) · B2 built + verified (in working tree at B3 close) · B3 verified 2026-07-05
+**Status:** B1 committed (fc7f73f) · B2 committed (6e77172) · B3 verified 2026-07-05, committed (8ceefdd)
 
 ## Goal
 
