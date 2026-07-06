@@ -1,7 +1,8 @@
 "use client";
 
 // Fires the short post-workout coach acknowledgment once, on mount. Mounted on
-// the dashboard (where the post-workout form redirects). The API route is
+// the dashboard as a safety net — the workout save flow (saveSession) hands off
+// to the coach chat, which normally triggers the review. The API route is
 // idempotent and only sends once per logged session, so repeated pings are cheap
 // — it no-ops on days with no logged workout or one already acknowledged.
 

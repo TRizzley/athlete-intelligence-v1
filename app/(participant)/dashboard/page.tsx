@@ -113,7 +113,7 @@ export default async function DashboardPage() {
           {checkin ? "Edit check-in" : "Morning check-in"}
         </Link>
         <Link
-          href="/post-workout"
+          href="/workout"
           className={checkin && !trained ? "btn-primary" : "btn-ghost"}
         >
           {trained ? "Edit workout" : "Log workout"}
@@ -232,7 +232,7 @@ export default async function DashboardPage() {
       ) : checkin ? (
         <div className="card mb-4 text-center">
           <p className="text-sm text-muted">Log your workout and your coach will review it.</p>
-          <Link href="/post-workout" className="mt-2 inline-block text-sm font-medium text-accent">
+          <Link href="/workout" className="mt-2 inline-block text-sm font-medium text-accent">
             Log workout →
           </Link>
         </div>

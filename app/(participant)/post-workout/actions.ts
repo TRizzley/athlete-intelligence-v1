@@ -86,7 +86,6 @@ export async function savePostWorkout(
   console.log(`[post-workout] saved for user=${user.id} date=${checkinDate}`);
 
   revalidatePath("/dashboard");
-  revalidatePath("/post-workout");
   revalidatePath("/admin");
   // Chat-first flow: land the athlete in the conversation, where the coach's
   // workout review is generated and posted (expect=review shows the typing state).

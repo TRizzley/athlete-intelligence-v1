@@ -8,7 +8,6 @@ const LINKS = [
   { href: "/checkin", label: "Check-in" },
   { href: "/dashboard", label: "Today" },
   { href: "/workout", label: "Workout" },
-  { href: "/post-workout", label: "Post-workout" },
   { href: "/coach", label: "Coach" },
 ];
 
