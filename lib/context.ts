@@ -42,7 +42,11 @@ export interface ContextOptions {
   feedbackLimit?: number;
   /** How many workout sessions to load (per-set logs follow). Default 5. */
   workoutSessionLimit?: number;
-  /** How many post-workout self-evals to load (newest first). Default 15. */
+  /**
+   * How many post-workout self-evals to load (newest first). Default 35 so a
+   * 5x/week athlete's 30-day pattern window (lib/coach-patterns.ts) is never
+   * truncated by the count bound.
+   */
   selfEvalLimit?: number;
   /**
    * If provided, `latestCheckin` in the returned context will be the row
@@ -73,7 +77,7 @@ export async function buildCoachContext(
     predictionLimit = 12,
     feedbackLimit = 12,
     workoutSessionLimit = 5,
-    selfEvalLimit = 15,
+    selfEvalLimit = 35,
     latestCheckinDate,
     recentMessages,
   } = opts;

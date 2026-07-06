@@ -99,3 +99,43 @@ describe("buildContextText — athlete self-evals", () => {
     );
   });
 });
+
+describe("buildContextText — workout patterns", () => {
+  it("renders the patterns section with its pre-computed summary line", () => {
+    const text = buildContextText(
+      ctx({
+        selfEvals: [
+          selfEval({ workout_date: "2026-07-03", day_name: "Leg day", rpe: 8 }),
+          selfEval({ workout_date: "2026-07-01", day_name: "Leg day", rpe: 8 }),
+        ],
+      }),
+    );
+
+    expect(text).toContain("WORKOUT PATTERNS");
+    expect(text).toContain('"peak_types":["Leg day"]');
+    expect(text).toContain('"avgRpe": 8');
+    expect(text).toContain('"trend": "stable"');
+    // Right after the self-evals it summarizes.
+    expect(text.indexOf("ATHLETE SELF-EVALS")).toBeLessThan(
+      text.indexOf("WORKOUT PATTERNS"),
+    );
+  });
+
+  it("omits the section when no workout type has enough evals for signal", () => {
+    const text = buildContextText(ctx({ selfEvals: [selfEval()] }));
+
+    expect(text).toContain("ATHLETE SELF-EVALS");
+    expect(text).not.toContain("WORKOUT PATTERNS");
+  });
+
+  it("omits the section when all evals fall outside the 30-day window", () => {
+    const stale = [
+      selfEval({ workout_date: "2026-04-01", day_name: "Leg day", rpe: 8 }),
+      selfEval({ workout_date: "2026-04-03", day_name: "Leg day", rpe: 8 }),
+    ];
+
+    expect(buildContextText(ctx({ selfEvals: stale }))).not.toContain(
+      "WORKOUT PATTERNS",
+    );
+  });
+});

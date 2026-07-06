@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import type { CoachContext } from "./coach-types";
 import { summarizeSelfEvals } from "./coach-evals";
+import { detectWorkoutPatterns } from "./coach-patterns";
 
 // ── Shared utils ──────────────────────────────────────────────────────────────
 
@@ -360,6 +361,25 @@ export function buildContextText(ctx: CoachContext, closing?: string): string {
         "\n" +
         JSON.stringify(evals, null, 2),
     );
+
+    // Pattern summary across those evals, grouped by the workout each one
+    // rated. Rendered only once at least one type has enough evals for signal.
+    const patterns = detectWorkoutPatterns(ctx.selfEvals, ctx.today);
+    if (Object.keys(patterns.byWorkoutType).length > 0) {
+      parts.push(
+        `WORKOUT PATTERNS (pre-computed from the self-evals above, grouped by WORKOUT TYPE — the workout the athlete rated, never calendar day-of-week. avg_rpe is the mean RPE for that type over the last ${patterns.windowDays} days; trend compares that type's earlier vs. later evals chronologically. peak_types average RPE >= 7 — the athlete performs strongest there, good days to push; struggle_types average <= 5 — favor recovery or technique focus there. All stats are pre-computed; do not re-derive them):\n` +
+          "SUMMARY: " +
+          JSON.stringify(
+            compact({
+              peak_types: patterns.peakTypes,
+              struggle_types: patterns.struggleTypes,
+              recommendations: patterns.recommendations,
+            }),
+          ) +
+          "\n" +
+          JSON.stringify(patterns.byWorkoutType, null, 2),
+      );
+    }
   }
 
   if (ctx.workoutDays && ctx.workoutDays.length > 0) {
