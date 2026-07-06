@@ -14,6 +14,7 @@ import type {
 import type { CoachContext } from "./coach-types";
 import { summarizeSelfEvals } from "./coach-evals";
 import { detectWorkoutPatterns } from "./coach-patterns";
+import { derivePatternFocus } from "./coach-focus";
 
 // ── Shared utils ──────────────────────────────────────────────────────────────
 
@@ -379,6 +380,25 @@ export function buildContextText(ctx: CoachContext, closing?: string): string {
           "\n" +
           JSON.stringify(patterns.byWorkoutType, null, 2),
       );
+
+      // Deterministic coaching directive derived from those patterns — the
+      // decision of what to emphasize is pre-computed in lib/coach-focus.ts;
+      // the model only voices it. Rendered only when a focus actually exists.
+      const focus = derivePatternFocus(patterns);
+      if (focus.push_type !== null || focus.pull_back_type !== null) {
+        parts.push(
+          "SUGGESTED FOCUS (pre-computed coaching angle from the workout patterns above — do not re-derive it. push_type is where the athlete is thriving: lean into it when giving recommendations. pull_back_type is where they're consistently struggling: ease off toward recovery or technique focus. Voice this naturally as encouragement in your own words — never quote it verbatim or read it back as raw data, and never mention calendar days. If push_type or pull_back_type is absent, simply don't force that angle):\n" +
+            "SUMMARY: " +
+            JSON.stringify(
+              compact({
+                push_type: focus.push_type,
+                pull_back_type: focus.pull_back_type,
+                confidence: focus.confidence,
+                rationale: focus.rationale,
+              }),
+            ),
+        );
+      }
     }
   }
 
