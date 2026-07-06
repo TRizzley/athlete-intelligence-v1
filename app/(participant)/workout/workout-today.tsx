@@ -21,7 +21,8 @@ import {
   type FormState,
 } from "./actions";
 import { Field } from "@/components/ui";
-import { SubmitButton } from "@/components/interactive";
+import { Slider, CheckPills, SubmitButton } from "@/components/interactive";
+import { WORKOUT_TYPES } from "@/lib/constants";
 import { todayISO, formatDate } from "@/lib/format";
 import type { WorkoutDay, WorkoutSession, WorkoutSetLog } from "@/lib/types";
 
@@ -29,14 +30,31 @@ const initial: FormState = { error: null };
 
 type DayLite = Pick<WorkoutDay, "id" | "name" | "label">;
 
+/** The session's saved self-eval, for prefilling the save-time rating. */
+type EvalPrefill = { rpe: number; feedback: string | null };
+
+/** The day's saved check-in training columns, so an update confirms rather
+ * than clobbers what an earlier save (or the post-workout tab) wrote. */
+export type CheckinPrefill = {
+  workout_types: string[] | null;
+  workout_type: string | null;
+  workout_split: string | null;
+  training_load: string | null;
+  top_set_lbs: number | null;
+};
+
 export function TodayWorkout({
   days,
   session,
   logs,
+  existingEval = null,
+  existingCheckin = null,
 }: {
   days: DayLite[];
   session: WorkoutSession | null;
   logs: WorkoutSetLog[];
+  existingEval?: EvalPrefill | null;
+  existingCheckin?: CheckinPrefill | null;
 }) {
   // Determine the athlete's LOCAL today (server renders in UTC).
   const [localToday, setLocalToday] = useState(session?.session_date ?? "");
@@ -69,6 +87,9 @@ export function TodayWorkout({
         key={session.id}
         session={session}
         logs={logs}
+        days={days}
+        existingEval={existingEval}
+        existingCheckin={existingCheckin}
         onChangeDay={() => setChanging(true)}
       />
     );
@@ -236,10 +257,16 @@ function toReps(v: string): number | null {
 function SessionLogger({
   session,
   logs,
+  days,
+  existingEval,
+  existingCheckin,
   onChangeDay,
 }: {
   session: WorkoutSession;
   logs: WorkoutSetLog[];
+  days: DayLite[];
+  existingEval: EvalPrefill | null;
+  existingCheckin: CheckinPrefill | null;
   onChangeDay: () => void;
 }) {
   const [state, action] = useActionState(saveSession, initial);
@@ -365,6 +392,25 @@ function SessionLogger({
 
   const logIds = logs.map((l) => l.id).join(",");
   const isCompleted = session.status === "completed";
+
+  // Save-time capture (replaces the separate post-workout check-in): the
+  // athlete's own workout-day names for the split select — keeping any saved
+  // value that's no longer in the list, like the post-workout form did — and
+  // the heaviest weight typed so far for the top-set auto-derive hint.
+  const splitDefault = existingCheckin?.workout_split ?? session.day_name ?? "";
+  const splitOptions = days.map((d) => d.name);
+  if (splitDefault && !splitOptions.includes(splitDefault)) {
+    splitOptions.unshift(splitDefault);
+  }
+  const maxWeight = useMemo(() => {
+    let max: number | null = null;
+    for (const v of Object.values(values)) {
+      if (v.weight.trim() === "") continue;
+      const n = Number(v.weight);
+      if (Number.isFinite(n) && (max === null || n > max)) max = n;
+    }
+    return max;
+  }, [values]);
 
   return (
     <form action={action} className="space-y-4">
@@ -596,6 +642,104 @@ function SessionLogger({
             onChange={(e) => onNotes(e.target.value)}
             className="input min-h-[64px]"
             placeholder="Felt strong, bumped bench 5lbs, left elbow a little cranky…"
+          />
+        </Field>
+      </section>
+
+      {/* Save-time capture — the post-workout check-in, folded into the save
+          moment. One RPE rates the session AND feeds the day's check-in; the
+          rest is confirm-not-re-enter. */}
+      <section className="card space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-2">
+            How did it go?
+          </h3>
+          <p className="mt-1 text-sm text-muted">
+            Rate the session and you&apos;re done — your coach takes it from
+            here. No separate check-in needed.
+          </p>
+        </div>
+
+        <Slider
+          name="rpe"
+          label="How did the session feel? (RPE)"
+          low="Easy"
+          high="All-out"
+          defaultValue={existingEval?.rpe ?? null}
+        />
+
+        <Field
+          label="One-liner (optional)"
+          htmlFor="eval_feedback"
+          hint="Your words — e.g. “felt strong”, “hit a plateau”"
+        >
+          <input
+            id="eval_feedback"
+            name="eval_feedback"
+            maxLength={200}
+            defaultValue={existingEval?.feedback ?? ""}
+            className="input"
+            placeholder="felt strong"
+          />
+        </Field>
+
+        <Field label="Workout type" hint="Pick all that apply.">
+          <CheckPills
+            name="workout_types"
+            options={WORKOUT_TYPES}
+            defaultValues={
+              existingCheckin?.workout_types ??
+              (existingCheckin?.workout_type ? [existingCheckin.workout_type] : [])
+            }
+          />
+        </Field>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Split" htmlFor="workout_split" hint="Which of your workout days">
+            <select
+              id="workout_split"
+              name="workout_split"
+              defaultValue={splitDefault}
+              className="input"
+            >
+              <option value="">—</option>
+              {splitOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field
+            label="Top set (lbs)"
+            htmlFor="top_set_lbs"
+            hint="Leave blank to use your heaviest set automatically"
+          >
+            <input
+              id="top_set_lbs"
+              name="top_set_lbs"
+              type="number"
+              inputMode="decimal"
+              step="any"
+              min="0"
+              defaultValue={existingCheckin?.top_set_lbs ?? ""}
+              className="input"
+              placeholder={maxWeight !== null ? String(maxWeight) : "245"}
+            />
+          </Field>
+        </div>
+
+        <Field
+          label="Load / key lifts (optional)"
+          htmlFor="training_load"
+          hint='Free text — e.g. "Squat 225x5, 245x3"'
+        >
+          <input
+            id="training_load"
+            name="training_load"
+            defaultValue={existingCheckin?.training_load ?? ""}
+            className="input"
+            placeholder="225x5, 245x3"
           />
         </Field>
       </section>

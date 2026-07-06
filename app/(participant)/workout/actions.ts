@@ -312,8 +312,26 @@ export async function startSession(
   redirect("/workout");
 }
 
-// Save the weights + reps the athlete entered for today's session. The form
-// posts weight_<logId> / reps_<logId> plus a hidden list of log ids.
+/** Max length for the optional eval one-liner (mirrors the DB CHECK and the
+ * A1 eval route's FEEDBACK_MAX_CHARS). */
+const EVAL_FEEDBACK_MAX_CHARS = 200;
+
+// Save the weights + reps the athlete entered for today's session, plus the
+// post-workout capture that used to live on the /post-workout tab: one save
+// writes the session (as before), the self-eval (workout_self_evals, A1
+// validation rules applied inline), and the daily_checkins training columns —
+// with ONE RPE value feeding both workout_self_evals.rpe and
+// daily_checkins.workout_intensity (the dual-write).
+//
+// Atomic-in-practice: every input is validated BEFORE any write, so bad input
+// never half-saves; after that, writes fail fast with one error, and because
+// every write is an idempotent update/upsert, pressing Save again heals any
+// partial state. (A true DB transaction would need an RPC — a schema change,
+// deliberately out of scope.)
+//
+// The form posts weight_<logId> / reps_<logId> plus a hidden list of log ids,
+// and the capture fields: rpe (omitted until the slider is tapped),
+// eval_feedback, workout_types, workout_split, training_load, top_set_lbs.
 export async function saveSession(
   _prev: FormState,
   formData: FormData,
@@ -324,10 +342,66 @@ export async function saveSession(
   const sessionId = str(formData, "session_id");
   if (!sessionId) return { error: "Missing session." };
 
+  // ── Validate everything before any write ──────────────────────────────────
+
+  // RPE: integer 1-10, required (A1's rule). The Slider omits its field
+  // entirely until the athlete taps it, so "missing" means "not rated".
+  const rpeRaw = str(formData, "rpe");
+  const rpe = rpeRaw === null ? NaN : Number(rpeRaw);
+  if (!Number.isInteger(rpe) || rpe < 1 || rpe > 10) {
+    return { error: "Rate the session (RPE 1–10) before saving." };
+  }
+
+  // Feedback: optional, trimmed, max 200 chars (A1's rule).
+  const feedback = str(formData, "eval_feedback");
+  if (feedback !== null && feedback.length > EVAL_FEEDBACK_MAX_CHARS) {
+    return {
+      error: `Keep the one-liner under ${EVAL_FEEDBACK_MAX_CHARS} characters.`,
+    };
+  }
+
+  // Ownership: the session must exist and belong to the caller (RLS already
+  // hides foreign rows; the explicit check turns a silent no-op into an error).
+  // session_date keys the daily_checkins upsert; status gates the redirect.
+  const { data: sessionRow } = await supabase
+    .from("workout_sessions")
+    .select("id, user_id, session_date, status")
+    .eq("id", sessionId)
+    .maybeSingle();
+  const session = sessionRow as {
+    id: string;
+    user_id: string;
+    session_date: string;
+    status: string | null;
+  } | null;
+  if (!session || session.user_id !== user.id) {
+    return { error: "That workout was not found." };
+  }
+  const wasCompleted = session.status === "completed";
+
   const ids = (str(formData, "log_ids") ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+
+  // Multi-select workout types; keep the legacy single column in sync (first
+  // pick) — exactly what the post-workout tab wrote.
+  const workoutTypes = formData
+    .getAll("workout_types")
+    .map(String)
+    .filter(Boolean);
+
+  // Top set: the athlete's explicit value wins; left blank, derive it from the
+  // heaviest weight they just logged (the session already knows the answer).
+  let topSetLbs = floatVal(formData.get("top_set_lbs"));
+  if (topSetLbs === null) {
+    for (const id of ids) {
+      const w = floatVal(formData.get(`weight_${id}`));
+      if (w !== null && (topSetLbs === null || w > topSetLbs)) topSetLbs = w;
+    }
+  }
+
+  // ── Writes (fail fast, idempotent — re-saving heals partial state) ────────
 
   await Promise.all(
     ids.map((id) =>
@@ -343,7 +417,7 @@ export async function saveSession(
   );
 
   // Optional session note + finalize: pressing Save marks the session completed.
-  await supabase
+  const { error: sessionErr } = await supabase
     .from("workout_sessions")
     .update({
       notes: str(formData, "notes"),
@@ -352,6 +426,45 @@ export async function saveSession(
     })
     .eq("id", sessionId)
     .eq("user_id", user.id);
+  if (sessionErr) {
+    return { error: `Could not save the workout: ${sessionErr.message}. Please try again.` };
+  }
+
+  // Self-eval: one row per workout, latest submission wins (A1 semantics).
+  const { error: evalErr } = await supabase.from("workout_self_evals").upsert(
+    {
+      user_id: user.id,
+      workout_id: sessionId,
+      rpe,
+      feedback,
+    },
+    { onConflict: "workout_id" },
+  );
+  if (evalErr) {
+    return { error: `Could not save your rating: ${evalErr.message}. Press Save again to retry.` };
+  }
+
+  // Daily check-in training columns — exactly what the post-workout tab's
+  // savePostWorkout wrote, keyed to the session's date. workout_intensity is
+  // the SAME rpe just saved above (dual-write); the upsert touches only these
+  // columns, so the morning check-in data is never disturbed.
+  const { error: checkinErr } = await supabase.from("daily_checkins").upsert(
+    {
+      user_id: user.id,
+      checkin_date: session.session_date,
+      workout_completed: true,
+      workout_types: workoutTypes,
+      workout_type: workoutTypes[0] ?? null,
+      workout_split: str(formData, "workout_split"),
+      workout_intensity: rpe,
+      training_load: str(formData, "training_load"),
+      top_set_lbs: topSetLbs,
+    },
+    { onConflict: "user_id,checkin_date" },
+  );
+  if (checkinErr) {
+    return { error: `Could not save the check-in: ${checkinErr.message}. Press Save again to retry.` };
+  }
 
   // Refresh the trend-engine gate stats (first-workout date + completed count)
   // so the trend-engine gate stays a cheap profile-field read. Best-effort.
@@ -363,6 +476,15 @@ export async function saveSession(
 
   revalidatePath("/workout");
   revalidatePath("/dashboard");
+  revalidatePath("/admin");
+
+  // First completion: land the athlete in the chat where the coach's workout
+  // review is generated (same handoff the post-workout tab used). Re-saves of
+  // an already-completed session stay on the page; post-workout-ack's
+  // "already reviewed" skip means no double review either way.
+  if (!wasCompleted) {
+    redirect("/coach/chat?expect=review");
+  }
   return { error: null, ok: true };
 }
 

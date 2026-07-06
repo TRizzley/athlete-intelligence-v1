@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageShell } from "@/components/ui";
 import { formatDate } from "@/lib/format";
-import { TodayWorkout } from "./workout-today";
+import { TodayWorkout, type CheckinPrefill } from "./workout-today";
 import type { WorkoutDay, WorkoutSession, WorkoutSetLog } from "@/lib/types";
 
 export const metadata = { title: "Workout — The Coach" };
@@ -39,14 +39,35 @@ export default async function WorkoutPage() {
   const days = (daysRes.data as Pick<WorkoutDay, "id" | "name" | "label">[]) ?? [];
   const session = (sessionRes.data as WorkoutSession) ?? null;
 
+  // Set logs plus prefill for the save-time capture: the session's existing
+  // self-eval (re-saves shouldn't force a re-rate) and the day's check-in
+  // training columns (so an update confirms saved values instead of clobbering
+  // them with blanks).
   let logs: WorkoutSetLog[] = [];
+  let existingEval: { rpe: number; feedback: string | null } | null = null;
+  let existingCheckin: CheckinPrefill | null = null;
   if (session) {
-    const { data: logData } = await supabase
-      .from("workout_set_logs")
-      .select("*")
-      .eq("session_id", session.id)
-      .order("position", { ascending: true });
-    logs = (logData as WorkoutSetLog[]) ?? [];
+    const [logRes, evalRes, checkinRes] = await Promise.all([
+      supabase
+        .from("workout_set_logs")
+        .select("*")
+        .eq("session_id", session.id)
+        .order("position", { ascending: true }),
+      supabase
+        .from("workout_self_evals")
+        .select("rpe, feedback")
+        .eq("workout_id", session.id)
+        .maybeSingle(),
+      supabase
+        .from("daily_checkins")
+        .select("workout_types, workout_type, workout_split, training_load, top_set_lbs")
+        .eq("user_id", user.id)
+        .eq("checkin_date", session.session_date)
+        .maybeSingle(),
+    ]);
+    logs = (logRes.data as WorkoutSetLog[]) ?? [];
+    existingEval = (evalRes.data as { rpe: number; feedback: string | null }) ?? null;
+    existingCheckin = (checkinRes.data as CheckinPrefill) ?? null;
   }
 
   const history = (historyRes.data as WorkoutSession[]) ?? [];
@@ -70,7 +91,13 @@ export default async function WorkoutPage() {
         </Link>
       </div>
 
-      <TodayWorkout days={days} session={session} logs={logs} />
+      <TodayWorkout
+        days={days}
+        session={session}
+        logs={logs}
+        existingEval={existingEval}
+        existingCheckin={existingCheckin}
+      />
 
       {/* Schedule / history — secondary to the workout itself. */}
       <div className="mt-10">
