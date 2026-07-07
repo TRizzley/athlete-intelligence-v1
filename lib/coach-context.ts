@@ -455,6 +455,30 @@ export function buildContextText(ctx: CoachContext, closing?: string): string {
     parts.push(lines.join("\n"));
   }
 
+  // Long-arc temporal summary (up to 180 days, span-aware). Pre-computed in
+  // lib/coach-temporal.ts; absent until the fetch side is wired (Milestone C2),
+  // so this renders nothing in production until then.
+  if (ctx.temporalSummary && ctx.temporalSummary.window.daysSpanned > 0) {
+    const t = ctx.temporalSummary;
+    parts.push(
+      `TEMPORAL KNOWLEDGE GRAPH (pre-computed long-arc view of the last ${t.window.daysSpanned} days — the athlete's training arc beyond the 30-day patterns above. Use it to place TODAY inside the arc (e.g. "week 5 of a 6-week climb — push now, plan the deload"). If fatigue_signal is present it overrides short-term enthusiasm: favor recovery even when recent patterns say push. All stats are pre-computed; do not re-derive them, and never recite tonnage numbers or this data back to the athlete):\n` +
+        JSON.stringify(
+          {
+            window: t.window,
+            frequency: t.frequency,
+            type_breakdown: t.typeBreakdown,
+            volume_arc: t.volumeArc,
+            volume_trend: t.volumeArc[t.volumeArc.length - 1]?.trend ?? null,
+            fatigue_signal: t.fatigueSignal,
+            rest_rhythm: t.restRhythm,
+            seasonality: t.seasonality,
+          },
+          null,
+          2,
+        ),
+    );
+  }
+
   // Calibration from feedback goes LAST so it's the freshest instruction in mind.
   const calibration = feedbackCalibration(ctx.feedback);
   if (calibration) parts.push(calibration);

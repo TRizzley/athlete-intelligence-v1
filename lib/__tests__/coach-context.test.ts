@@ -184,3 +184,49 @@ describe("buildContextText — suggested focus", () => {
     );
   });
 });
+
+describe("buildContextText — temporal knowledge graph", () => {
+  const summary = {
+    window: { daysSpanned: 42, from: "2026-05-23", to: "2026-07-04" },
+    frequency: {
+      totalSessions: 22,
+      sessionsPerWeek: 3.7,
+      consistency: "consistent",
+    },
+    typeBreakdown: {
+      strength: { count: 12, avgIntensity: 7.4, trend: "stable" as const },
+    },
+    volumeArc: [
+      { weekLabel: "Week 1-4", totalTonnage: 91725, trend: "insufficient_data" as const },
+      { weekLabel: "Week 5-8", totalTonnage: 54325, trend: "declining" as const },
+    ],
+    fatigueSignal: { detected: true, when: "Week 5-8", severity: "mild" as const },
+    restRhythm: {
+      avgGapDays: 1.9,
+      maxGapDays: 4,
+      gapsOver3d: 1,
+      inference: "consistent" as const,
+    },
+    seasonality: null,
+  };
+
+  it("renders the section when a temporal summary is present", () => {
+    const text = buildContextText(ctx({ temporalSummary: summary }));
+
+    expect(text).toContain("TEMPORAL KNOWLEDGE GRAPH");
+    expect(text).toContain("last 42 days");
+    expect(text).toContain('"fatigue_signal"');
+    expect(text).toContain('"volume_trend": "declining"');
+  });
+
+  it("omits the section when absent or empty", () => {
+    expect(buildContextText(ctx())).not.toContain("TEMPORAL KNOWLEDGE GRAPH");
+    const empty = {
+      ...summary,
+      window: { daysSpanned: 0, from: "", to: "" },
+    };
+    expect(buildContextText(ctx({ temporalSummary: empty }))).not.toContain(
+      "TEMPORAL KNOWLEDGE GRAPH",
+    );
+  });
+});

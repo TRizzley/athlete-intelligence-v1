@@ -85,4 +85,5 @@ export interface CoachContext {
   programContext?: ProgramContext; // absent for brand-new athletes
   workoutDays?: WorkoutDayBrief[]; // saved program structure (days + exercises with IDs)
   trendInsights?: import("./coach-trends").TrendInsights | null; // trend engine output (gated; absent until 21 days of data)
+  temporalSummary?: import("./coach-temporal").TemporalSummary | null; // long-arc view (up to 180 days; absent until C2 wires the fetch)
 }

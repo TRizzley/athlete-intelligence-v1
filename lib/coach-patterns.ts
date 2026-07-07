@@ -17,7 +17,7 @@ export const PEAK_RPE = 7;
 /** Average RPE at or below this marks a struggle workout type. */
 export const STRUGGLE_RPE = 5;
 /** First-half vs. second-half average gap that counts as a real trend. */
-const TREND_DELTA = 0.5;
+export const TREND_DELTA = 0.5;
 
 const MS_PER_DAY = 86_400_000;
 
