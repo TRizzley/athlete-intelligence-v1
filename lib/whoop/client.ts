@@ -161,7 +161,9 @@ export async function refreshWhoopToken(
       client_secret: process.env.WHOOP_CLIENT_SECRET ?? "",
       grant_type: "refresh_token",
       refresh_token: token.refresh_token,
-      scope: "read:recovery read:sleep read:workout read:cycles read:body_measurement read:profile",
+      // "offline" must be re-requested here too: WHOOP refresh tokens are
+      // single-use, and a refresh without it returns no new refresh_token.
+      scope: "read:recovery read:sleep read:workout read:cycles read:body_measurement read:profile offline",
     }),
   });
 
@@ -341,6 +343,7 @@ const WHOOP_SCOPES = [
   "read:cycles",
   "read:body_measurement",
   "read:profile",
+  "offline", // required for WHOOP to issue a refresh_token
 ].join(" ");
 
 export function whoopAuthUrl(redirectUri: string, state: string): string {
